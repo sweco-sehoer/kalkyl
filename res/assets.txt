@@ -1,0 +1,4 @@
+list app 256
+img  kalkyl ikon-256.png
+list app32 32
+img  kalkyl ikon-32.png

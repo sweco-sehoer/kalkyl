@@ -1,0 +1,11 @@
+﻿Kalkyl – licensvillkor
+
+Kalkyl är ett internt program för luftledningsberäkningar, utvecklat för SWECO Sverige AB. Programmet får bara användas i SWECO Sverige AB:s verksamhet.
+
+Programmet får inte spridas, säljas eller lämnas ut utanför SWECO utan utgivarens tillstånd.
+
+Programmet levereras i befintligt skick. Beräkningsresultat ska granskas enligt SWECO:s rutiner innan de används i ett uppdrag.
+
+Programmet installeras bara för den inloggade användaren. Projektfiler och inställningar ligger kvar om programmet avinstalleras.
+
+Utgivare: SWECO Sverige AB, Erik Holmbom

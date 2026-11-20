@@ -1,0 +1,40 @@
+// GENERERAD av GlazeBuilder — redigera i GlazeBuilder, inte här.
+// glazeui-design: ui=Slate theme=slate(Windows) style=0 lang=sv
+#include "main_window.h"
+
+MainWindow::MainWindow() { initializeComponent(); }
+
+void MainWindow::initializeComponent()
+{
+    setTitle("Kalkyl");
+    setContentSize(1024, 640);
+    setMinimumSize(640, 400);
+    setStartPosition(glaze::StartPosition::CenterScreen);
+
+    appIcon.setIcon(glaze::img("app", "kalkyl"));
+    appIcon.setSmallIcon(glaze::img("app32", "kalkyl"));
+    appIcon.setLarge(true);
+
+    menuBar.setInTitleBar(true);
+    menuBar.show();
+    menuBar.addMenu("Arkiv");
+    menuBar.addItem("Arkiv", "Stäng projekt", "Ctrl+W");
+    menuBar.addSeparator("Arkiv");
+    menuBar.addItem("Arkiv", "Avsluta", "Alt+F4");
+    menuBar.addMenu("Hjälp");
+    menuBar.addItem("Hjälp", "Om Kalkyl");
+
+    statusBar.show();
+    statusBar.addPanel("Redo", 0, true);
+
+    themeBtn.name = "themeBtn";
+    themeBtn.setGlyphOnly(true);
+    themeBtn.setImg(glaze::stockIcon(glaze::StockIcon::ThemeSystem));
+    themeBtn.setToolTip("Utseende: System");
+    themeBtn.dock = glaze::Dock::Right;
+
+    themeBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { themeBtnClicked(s, e); };
+    glaze::AppWindow::onLoad = [this](glaze::Widget* s, glaze::EventArgs& e) { onLoad(s, e); };
+
+    topBar.adopt(themeBtn);
+}

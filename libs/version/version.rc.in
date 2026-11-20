@@ -1,0 +1,34 @@
+// Versionsresursen för kalkyl.exe, ifylld av CMake från project(VERSION) och KALKYL_PUBLISHER.
+// Egenskaper > Information visar den. Aktivitetshanteraren och "Öppna med" visar
+// FileDescription som programmets namn. Filen är UTF-8, därav code_page.
+#pragma code_page(65001)
+
+1 VERSIONINFO
+FILEVERSION     @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION  @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEFLAGSMASK   0x3f
+FILEFLAGS       0x0
+FILEOS          0x40004
+FILETYPE        0x1
+FILESUBTYPE     0x0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "041D04B0"
+    BEGIN
+      VALUE "CompanyName",      "@KALKYL_PUBLISHER@"
+      VALUE "FileDescription",  "Kalkyl"
+      VALUE "FileVersion",      "@PROJECT_VERSION@"
+      VALUE "InternalName",     "kalkyl"
+      VALUE "LegalCopyright",   "© SWECO Sverige AB. Internt program."
+      VALUE "OriginalFilename", "kalkyl.exe"
+      VALUE "ProductName",      "Kalkyl"
+      VALUE "ProductVersion",   "@PROJECT_VERSION@"
+      VALUE "Comments",         "Luftledningsberäkningar"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x041D, 1200
+  END
+END

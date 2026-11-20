@@ -1,0 +1,8 @@
+#pragma once
+
+// Programmets version, ifylld av CMake från project(VERSION).
+// major = klart, minor = nya/API-brytande funktioner, patch = fixar.
+#define KALKYL_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define KALKYL_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define KALKYL_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define KALKYL_VERSION       "@PROJECT_VERSION@"

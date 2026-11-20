@@ -1,0 +1,59 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug (UCRT64, Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "C:/msys64/ucrt64/bin/gcc.exe",
+        "CMAKE_CXX_COMPILER": "C:/msys64/ucrt64/bin/g++.exe",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release (UCRT64, Ninja)",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "tools",
+      "displayName": "GlazeUI-verktygen (glazeassets, glaze-render)",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build-tools",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "GLAZE_TOOLS": "ON"
+      }
+    },
+    {
+      "name": "test",
+      "displayName": "Tester (KALKYL_TESTS)",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build-test",
+      "cacheVariables": {
+        "KALKYL_TESTS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "tools", "configurePreset": "tools", "targets": ["glazeassets", "glaze-render"] },
+    { "name": "installer", "configurePreset": "release", "targets": ["installer"] },
+    { "name": "test", "configurePreset": "test" }
+  ],
+  "testPresets": [
+    {
+      "name": "test",
+      "configurePreset": "test",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

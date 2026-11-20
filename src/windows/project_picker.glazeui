@@ -1,0 +1,106 @@
+// GENERERAD av GlazeBuilder — redigera i GlazeBuilder, inte här.
+// glazeui-design: ui=Slate theme=slate(Windows) style=0 lang=sv
+#include "project_picker.h"
+
+ProjectPicker::ProjectPicker() { initializeComponent(); }
+
+void ProjectPicker::initializeComponent()
+{
+    setTitle("Kalkyl");
+    setContentSize(720, 420);
+    setMinimumContentSize(560, 300);
+    setStartPosition(glaze::StartPosition::CenterScreen);
+    setAcceptButton(openBtn);
+
+    appIcon.setIcon(glaze::img("app", "kalkyl"));
+    appIcon.setSmallIcon(glaze::img("app32", "kalkyl"));
+
+    statusBar.show();
+    statusBar.addPanel("", 0, true);
+
+    themeBtn.name = "themeBtn";
+    themeBtn.setGlyphOnly(true);
+    themeBtn.setImg(glaze::stockIcon(glaze::StockIcon::ThemeSystem));
+    themeBtn.setToolTip("Utseende: System");
+    themeBtn.dock = glaze::Dock::Right;
+
+    titleLbl.name = "titleLbl";
+    titleLbl.setText("Senaste projekt");
+    titleLbl.setRole(glaze::Label::Role::Heading);
+    titleLbl.x = 16;
+    titleLbl.y = 16;
+
+    newBtn.name = "newBtn";
+    newBtn.setText("Nytt projekt…");
+    newBtn.setImg(glaze::stockIcon(glaze::StockIcon::New));
+    newBtn.setToolTip("Skapa ett nytt projekt på valfri plats");
+    newBtn.width = 184;
+    newBtn.anchors = {false, true, true, false};
+    newBtn.right = 16;
+    newBtn.anchorTop = {"titleLbl", 8};
+
+    browseBtn.name = "browseBtn";
+    browseBtn.setText("Öppna annat projekt…");
+    browseBtn.setImg(glaze::stockIcon(glaze::StockIcon::Open));
+    browseBtn.setToolTip("Öppna en projektfil (.kalkyl) med filväljaren");
+    browseBtn.width = 184;
+    browseBtn.anchors = {false, true, true, false};
+    browseBtn.right = 16;
+    browseBtn.anchorTop = {"newBtn", 8};
+
+    openBtn.name = "openBtn";
+    openBtn.setText("Öppna");
+    openBtn.width = 184;
+    openBtn.anchors = {false, true, true, false};
+    openBtn.right = 16;
+    openBtn.anchorTop = {"browseBtn", 24};
+
+    removeBtn.name = "removeBtn";
+    removeBtn.setText("Ta bort ur listan");
+    removeBtn.setToolTip("Tar bara bort raden ur listan, inte filen");
+    removeBtn.width = 184;
+    removeBtn.anchors = {false, true, true, false};
+    removeBtn.right = 16;
+    removeBtn.anchorTop = {"openBtn", 8};
+
+    recentList.name = "recentList";
+    recentList.setColumns({{"Namn", 140}, {.text = "Mapp", .width = 100, .sizing = glaze::ColumnSizing::Autosize}, {"Senast öppnad", 120}, {"Status", 100}});
+    recentList.x = 16;
+    recentList.anchors = {true, true, false, true};
+    recentList.anchorTop = {"titleLbl", 8};
+    recentList.anchorRight = {"newBtn", 16};
+    recentList.bottom = 16;
+
+    emptyLbl.name = "emptyLbl";
+    emptyLbl.setText("Inga senaste projekt ännu. Skapa ett nytt projekt eller öppna ett befintligt.");
+    emptyLbl.setRole(glaze::Label::Role::Dim);
+    emptyLbl.setWrap(true);
+    emptyLbl.x = 16;
+    emptyLbl.anchors = {true, true, false, false};
+    emptyLbl.anchorTop = {"titleLbl", 8};
+    emptyLbl.anchorRight = {"newBtn", 16};
+    emptyLbl.hide();
+
+    showTimer.name = "showTimer";
+    showTimer.setInterval(400);
+    showTimer.setSingleShot(true);
+
+    themeBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { themeBtnClicked(s, e); };
+    newBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { newBtnClicked(s, e); };
+    browseBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { browseBtnClicked(s, e); };
+    openBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { openBtnClicked(s, e); };
+    removeBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { removeBtnClicked(s, e); };
+    recentList.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { recentListChanged(s, e); };
+    recentList.onActivate = [this](glaze::Widget* s, glaze::ActivateArgs& e) { recentListActivated(s, e); };
+    showTimer.onTick = [this](glaze::Timer* s, glaze::TimerArgs& e) { showTimerTick(s, e); };
+    glaze::AppWindow::onLoad = [this](glaze::Widget* s, glaze::EventArgs& e) { onLoad(s, e); };
+
+    topBar.adopt(themeBtn);
+    root().adopt(titleLbl);
+    root().adopt(newBtn);
+    root().adopt(browseBtn);
+    root().adopt(openBtn);
+    root().adopt(removeBtn);
+    root().adopt(recentList);
+    root().adopt(emptyLbl);
+}

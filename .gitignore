@@ -1,0 +1,13 @@
+# Byggkataloger
+/build*/
+/out/
+/ref/
+
+# Ikonens mellanbilder: skapas om med res/rita_ikon.ps1
+/res/ikon-*.png
+
+# Editor och verktyg
+/.vscode/
+/.cache/
+compile_commands.json
+*.user
