@@ -7,6 +7,7 @@
 #include "platform/files.h"
 #include "platform/system.h"
 #include "platform/text.h"
+#include "systemdb/conductor_seed_v1.h"
 
 namespace kalkyl::systemdb {
 
@@ -16,8 +17,9 @@ using core::Error;
 using core::ErrorCode;
 using core::Result;
 
-// Schema version 1: inställningar (nyckel och värde) och listan över senaste projekt.
-// Se planen 2.10. path_key är jämförelsenyckeln, path den sökväg som visas och öppnas.
+// Schema version 1: inställningar (nyckel och värde), listan över senaste projekt och linregistret.
+// Se planen 2.10 (Grunder) och 3 (Lindata). path_key är jämförelsenyckeln, path den sökväg som
+// visas och öppnas. Linregistrets regler ligger i C++ och inte som CHECK, bortsett från flaggan.
 constexpr std::string_view kSchemaV1 = R"sql(
 CREATE TABLE setting (
     key   TEXT PRIMARY KEY NOT NULL,
@@ -30,16 +32,100 @@ CREATE TABLE recent_project (
     last_opened TEXT NOT NULL
 );
 CREATE INDEX recent_project_last_opened ON recent_project(last_opened);
+-- Startdatan, orörd. Bara migreringsstegen skriver här. Återställningen läser härifrån.
+CREATE TABLE conductor_seed (
+    seed_key              TEXT PRIMARY KEY NOT NULL,
+    name                  TEXT NOT NULL,
+    type                  TEXT NOT NULL DEFAULT '',
+    area_mm2              REAL NOT NULL,
+    diameter_mm           REAL NOT NULL,
+    e_initial_mpa         REAL NOT NULL,
+    e_permanent_mpa       REAL NOT NULL,
+    e_initial_limit_mpa   REAL NOT NULL,
+    eiv_constant          REAL NOT NULL,
+    alpha_e6_per_c        REAL NOT NULL,
+    creep_strain_permille REAL NOT NULL,
+    creep_temp_c          REAL NOT NULL,
+    weight_n_per_m        REAL NOT NULL,
+    breaking_load_kn      REAL,
+    sort_order            INTEGER NOT NULL
+);
+-- Linregistret som användaren redigerar. id återanvänds aldrig.
+CREATE TABLE conductor (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                  TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    type                  TEXT NOT NULL DEFAULT '',
+    area_mm2              REAL NOT NULL,
+    diameter_mm           REAL NOT NULL,
+    e_initial_mpa         REAL NOT NULL,
+    e_permanent_mpa       REAL NOT NULL,
+    e_initial_limit_mpa   REAL NOT NULL,
+    eiv_constant          REAL NOT NULL,
+    alpha_e6_per_c        REAL NOT NULL,
+    creep_strain_permille REAL NOT NULL,
+    creep_temp_c          REAL NOT NULL,
+    weight_n_per_m        REAL NOT NULL,
+    breaking_load_kn      REAL,
+    sort_order            INTEGER NOT NULL,
+    seed_key              TEXT UNIQUE,
+    user_modified         INTEGER NOT NULL DEFAULT 0 CHECK (user_modified IN (0, 1))
+);
+CREATE INDEX conductor_order ON conductor(sort_order, id);
+-- Startdatalinor som användaren tagit bort. En senare migrering lägger inte tillbaka dem.
+CREATE TABLE conductor_seed_removed (
+    seed_key TEXT PRIMARY KEY NOT NULL
+);
 )sql";
 
-// Schemat för systemdatabasen. En tom fil får initieras.
+// Tabellerna som schemat ska innehålla. Schemakontrollen räknar dem, så listan hålls lika med
+// schemat: ett nytt steg med en ny tabell lägger till den här.
+constexpr std::string_view kExpectedTables =
+    "'setting', 'recent_project', 'conductor_seed', 'conductor', 'conductor_seed_removed'";
+constexpr int kExpectedTableCount = 5;
+
+// Schemat för systemdatabasen. En tom fil får initieras. Steg 1 är tabellerna och startdatan,
+// ihopfogade en gång eftersom db::Schema kräver att stegen lever så länge programmet.
 db::Schema schema()
 {
+    static const std::string step1 = std::string(kSchemaV1) + std::string(kConductorSeedV1);
     db::Schema s;
     s.applicationId = kApplicationId;
-    s.steps = {kSchemaV1};
+    s.steps = {step1};
     s.allowInitialize = true;
     return s;
+}
+
+// Ett fel med en kod, en svensk text till användaren och en teknisk detalj till loggen.
+Error makeError(ErrorCode code, std::string message, std::string detail = {})
+{
+    Error e;
+    e.code = code;
+    e.message = std::move(message);
+    e.detail = std::move(detail);
+    return e;
+}
+
+// Tecknet för radbrytning i meddelandena.
+const char kNewline = static_cast<char>(10);
+
+// Kontrollerar att alla tabeller i schemat finns. En fil vars tabeller inte stämmer med dess
+// version är skadad (planen 2.8) och flyttas undan av open. Ingenting repareras här.
+Result<void> checkSchema(db::Database& database)
+{
+    auto stmt = database.prepare(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN (" +
+        std::string(kExpectedTables) + ")");
+    if (!stmt)
+        return stmt.error();
+    auto row = stmt.value().step();
+    if (!row)
+        return row.error();
+    const std::int64_t found = row.value() ? stmt.value().integer(0) : 0;
+    if (found != kExpectedTableCount)
+        return makeError(ErrorCode::NotADatabase, "Systemdatabasen saknar tabeller.",
+                         std::to_string(found) + " av " + std::to_string(kExpectedTableCount) +
+                             " tabeller finns");
+    return {};
 }
 
 // Fogar ihop en mapp och ett filnamn med std::filesystem, så att UTF-8 och avgränsare blir rätt.
@@ -60,6 +146,8 @@ Result<db::Database> openMigrated(const std::string& path)
     auto migrated = db::migrate(database.value(), schema());
     if (!migrated)
         return migrated.error();
+    if (auto checked = checkSchema(database.value()); !checked)
+        return checked.error();
     return std::move(database).value();
 }
 
@@ -275,6 +363,372 @@ Result<void> SystemDb::removeRecentProject(const std::string& path)
         return stmt.error();
     stmt.value().bind(1, platform::pathKey(path));
     return stmt.value().run();
+}
+
+namespace {
+
+// Kolumnerna som läses för en lina. Ordningen är den som readConductor förutsätter.
+constexpr std::string_view kConductorColumns =
+    "id, name, type, area_mm2, diameter_mm, e_initial_mpa, e_permanent_mpa, "
+    "e_initial_limit_mpa, eiv_constant, alpha_e6_per_c, creep_strain_permille, creep_temp_c, "
+    "weight_n_per_m, breaking_load_kn, seed_key, user_modified";
+
+// Bygger en Conductor ur den aktuella raden. Ursprunget härleds ur seed_key och user_modified.
+Conductor readConductor(const db::Statement& s)
+{
+    Conductor c;
+    c.id = s.integer(0);
+    c.name = s.text(1);
+    c.type = s.text(2);
+    c.areaMm2 = s.real(3);
+    c.diameterMm = s.real(4);
+    c.eInitialMpa = s.real(5);
+    c.ePermanentMpa = s.real(6);
+    c.eInitialLimitMpa = s.real(7);
+    c.eivConstant = s.real(8);
+    c.alphaE6PerC = s.real(9);
+    c.creepStrainPermille = s.real(10);
+    c.creepTempC = s.real(11);
+    c.weightNPerM = s.real(12);
+    if (!s.isNull(13))
+        c.breakingLoadKn = s.real(13);
+    if (s.isNull(14))
+        c.origin = ConductorOrigin::Own;
+    else
+        c.origin = s.integer(15) == 1 ? ConductorOrigin::SeedModified : ConductorOrigin::Seed;
+    return c;
+}
+
+// Sant för blank, tabb, vagnretur och radbrytning.
+bool isSpace(char c)
+{
+    return c == 32 || c == 9 || c == 13 || c == 10;
+}
+
+// Tar bort blanktecken i början och slutet av en text.
+std::string trimmed(const std::string& text)
+{
+    std::size_t first = 0;
+    std::size_t last = text.size();
+    while (first < last && isSpace(text[first]))
+        ++first;
+    while (last > first && isSpace(text[last - 1]))
+        --last;
+    return text.substr(first, last - first);
+}
+
+// Läser en lina på id. Svaret är tomt om id saknas.
+Result<std::optional<Conductor>> loadConductor(db::Database& database, std::int64_t id)
+{
+    auto stmt = database.prepare("SELECT " + std::string(kConductorColumns) +
+                                 " FROM conductor WHERE id = ?1");
+    if (!stmt)
+        return stmt.error();
+    stmt.value().bind(1, id);
+    auto row = stmt.value().step();
+    if (!row)
+        return row.error();
+    if (!row.value())
+        return std::optional<Conductor>{};
+    return std::optional<Conductor>{readConductor(stmt.value())};
+}
+
+// Binder namn, typ och värden på plats 1-13 i INSERT- och UPDATE-satserna nedan.
+// Saknad brottlast binds som NULL.
+void bindConductorValues(db::Statement& s, const Conductor& c)
+{
+    s.bind(1, c.name).bind(2, c.type);
+    s.bind(3, c.areaMm2).bind(4, c.diameterMm).bind(5, c.eInitialMpa).bind(6, c.ePermanentMpa);
+    s.bind(7, c.eInitialLimitMpa).bind(8, c.eivConstant).bind(9, c.alphaE6PerC);
+    s.bind(10, c.creepStrainPermille).bind(11, c.creepTempC).bind(12, c.weightNPerM);
+    if (c.breakingLoadKn)
+        s.bind(13, *c.breakingLoadKn);
+    else
+        s.bindNull(13);
+}
+
+// Tar bort linorna och skriver startdatalinornas nycklar i conductor_seed_removed.
+// Ett id som saknas är inget fel. Anroparen har en transaktion.
+Result<void> removeConductors(db::Database& database, const std::vector<std::int64_t>& removals)
+{
+    for (const std::int64_t id : removals) {
+        std::vector<std::string> seedKeys;
+        {
+            auto del = database.prepare("DELETE FROM conductor WHERE id = ?1 RETURNING seed_key");
+            if (!del)
+                return del.error();
+            del.value().bind(1, id);
+            while (true) {
+                auto row = del.value().step();
+                if (!row)
+                    return row.error();
+                if (!row.value())
+                    break;
+                if (!del.value().isNull(0))
+                    seedKeys.push_back(del.value().text(0));
+            }
+        }
+        for (const std::string& key : seedKeys) {
+            auto mark = database.prepare("INSERT OR IGNORE INTO conductor_seed_removed(seed_key) VALUES(?1)");
+            if (!mark)
+                return mark.error();
+            mark.value().bind(1, key);
+            if (auto r = mark.value().run(); !r)
+                return r;
+        }
+    }
+    return {};
+}
+
+// Sant om en annan rad än den med id redan har namnet (NOCASE, kolumnens jämförelse).
+Result<bool> nameTaken(db::Database& database, const std::string& name, std::int64_t id)
+{
+    auto stmt = database.prepare("SELECT id FROM conductor WHERE name = ?1 AND id <> ?2");
+    if (!stmt)
+        return stmt.error();
+    stmt.value().bind(1, name).bind(2, id);
+    auto row = stmt.value().step();
+    if (!row)
+        return row.error();
+    return row.value();
+}
+
+// Skriver en ändrad rad. Flaggan user_modified sätts för en startdatarad och nollas för en egen.
+Result<void> updateConductor(db::Database& database, const Conductor& c)
+{
+    auto stmt = database.prepare(
+        "UPDATE conductor SET name = ?1, type = ?2, area_mm2 = ?3, diameter_mm = ?4, "
+        "e_initial_mpa = ?5, e_permanent_mpa = ?6, e_initial_limit_mpa = ?7, eiv_constant = ?8, "
+        "alpha_e6_per_c = ?9, creep_strain_permille = ?10, creep_temp_c = ?11, "
+        "weight_n_per_m = ?12, breaking_load_kn = ?13, "
+        "user_modified = CASE WHEN seed_key IS NULL THEN 0 ELSE 1 END WHERE id = ?14");
+    if (!stmt)
+        return stmt.error();
+    bindConductorValues(stmt.value(), c);
+    stmt.value().bind(14, c.id);
+    return stmt.value().run();
+}
+
+// Lägger in en egen lina sist i ordningen och svarar med det nya id:t.
+Result<std::int64_t> insertConductor(db::Database& database, const Conductor& c)
+{
+    auto stmt = database.prepare(
+        "INSERT INTO conductor(name, type, area_mm2, diameter_mm, e_initial_mpa, e_permanent_mpa, "
+        "e_initial_limit_mpa, eiv_constant, alpha_e6_per_c, creep_strain_permille, creep_temp_c, "
+        "weight_n_per_m, breaking_load_kn, sort_order, seed_key, user_modified) "
+        "VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, "
+        "(SELECT coalesce(max(sort_order), 0) + 10 FROM conductor), NULL, 0) RETURNING id");
+    if (!stmt)
+        return stmt.error();
+    bindConductorValues(stmt.value(), c);
+    std::int64_t id = 0;
+    while (true) {
+        auto row = stmt.value().step();
+        if (!row)
+            return row.error();
+        if (!row.value())
+            break;
+        id = stmt.value().integer(0);
+    }
+    return id;
+}
+
+// Sparningens gemensamma del, utan egen transaktion (planen 4.2). Borttagningarna körs först.
+// Raderna valideras och trimmas, oförändrade hoppas över, omdöpta får först ett tillfälligt namn
+// så att namnbyten mellan två rader inte krockar, och sedan skrivs resten. Svarar med id per rad.
+Result<std::vector<std::int64_t>> applyConductorChanges(db::Database& database,
+                                                        const std::vector<Conductor>& upserts,
+                                                        const std::vector<std::int64_t>& removals)
+{
+    if (auto r = removeConductors(database, removals); !r)
+        return r.error();
+
+    // Validering och trimning av alla rader innan något skrivs.
+    std::vector<Conductor> rows = upserts;
+    for (Conductor& row : rows) {
+        row.name = trimmed(row.name);
+        row.type = trimmed(row.type);
+        const auto issues = validateConductor(row);
+        if (!issues.empty())
+            return makeError(ErrorCode::Invalid, issues.front().message, "lina " + row.name);
+    }
+
+    // Raderna som redan finns läses som de står, för att se vilka som ändrats och vilka som byter namn.
+    std::vector<bool> skip(rows.size(), false);
+    std::vector<bool> renamed(rows.size(), false);
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (rows[i].id == 0)
+            continue;
+        auto existing = loadConductor(database, rows[i].id);
+        if (!existing)
+            return existing.error();
+        if (!existing.value())
+            return makeError(ErrorCode::NotFound,
+                             "Linan finns inte i linregistret:" + std::string(1, kNewline) + rows[i].name,
+                             "id " + std::to_string(rows[i].id));
+        skip[i] = sameConductorValues(*existing.value(), rows[i]);
+        renamed[i] = !skip[i] && existing.value()->name != rows[i].name;
+    }
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (!renamed[i])
+            continue;
+        auto temp = database.prepare("UPDATE conductor SET name = char(1) || id WHERE id = ?1");
+        if (!temp)
+            return temp.error();
+        temp.value().bind(1, rows[i].id);
+        if (auto r = temp.value().run(); !r)
+            return r.error();
+    }
+
+    // Namnkontroll och skrivning, rad för rad i den givna ordningen.
+    std::vector<std::int64_t> ids(rows.size(), 0);
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        ids[i] = rows[i].id;
+        if (skip[i])
+            continue;
+        auto taken = nameTaken(database, rows[i].name, rows[i].id);
+        if (!taken)
+            return taken.error();
+        if (taken.value())
+            return makeError(ErrorCode::AlreadyExists,
+                             "Det finns redan en lina med namnet:" + std::string(1, kNewline) + rows[i].name,
+                             "namnet finns i conductor");
+        if (rows[i].id == 0) {
+            auto id = insertConductor(database, rows[i]);
+            if (!id)
+                return id.error();
+            ids[i] = id.value();
+        } else if (auto r = updateConductor(database, rows[i]); !r) {
+            return r.error();
+        }
+    }
+    return ids;
+}
+
+} // namespace
+
+// Hela linregistret i registrets ordning: sort_order och därefter id.
+Result<std::vector<Conductor>> SystemDb::conductors()
+{
+    auto stmt = db_.prepare("SELECT " + std::string(kConductorColumns) +
+                            " FROM conductor ORDER BY sort_order, id");
+    if (!stmt)
+        return stmt.error();
+    std::vector<Conductor> list;
+    while (true) {
+        auto row = stmt.value().step();
+        if (!row)
+            return row.error();
+        if (!row.value())
+            break;
+        list.push_back(readConductor(stmt.value()));
+    }
+    return list;
+}
+
+// En lina på id. Svaret är tomt när id saknas, och det är inget fel.
+Result<std::optional<Conductor>> SystemDb::conductor(std::int64_t id)
+{
+    return loadConductor(db_, id);
+}
+
+// Lägger till (id 0) eller uppdaterar en lina i en egen transaktion och svarar med id.
+// Valideringen, trimningen och namnkontrollen står i applyConductorChanges.
+Result<std::int64_t> SystemDb::saveConductor(const Conductor& c)
+{
+    std::int64_t id = 0;
+    auto done = db_.transaction([&]() -> Result<void> {
+        auto ids = applyConductorChanges(db_, {c}, {});
+        if (!ids)
+            return ids.error();
+        id = ids.value().front();
+        return {};
+    });
+    if (!done)
+        return done.error();
+    return id;
+}
+
+// Tar bort en lina. En startdatalinas nyckel skrivs i conductor_seed_removed, så att en
+// senare migrering inte lägger tillbaka den. Ett id som saknas är inget fel.
+Result<void> SystemDb::removeConductor(std::int64_t id)
+{
+    return db_.transaction([&]() -> Result<void> {
+        auto r = applyConductorChanges(db_, {}, {id});
+        if (!r)
+            return r.error();
+        return {};
+    });
+}
+
+// Fönstrets sparning: borttagningar, uppdateringar och nya linor i EN transaktion.
+// Vid fel rullas allt tillbaka, så ingenting sparas.
+Result<void> SystemDb::saveConductors(const std::vector<Conductor>& upserts,
+                                      const std::vector<std::int64_t>& removals)
+{
+    return db_.transaction([&]() -> Result<void> {
+        auto r = applyConductorChanges(db_, upserts, removals);
+        if (!r)
+            return r.error();
+        return {};
+    });
+}
+
+// Startdatan tillbaka (planen 2.7) i en transaktion. En egen lina med ett startdatanamn stoppar
+// allt. Startdatarader uppdateras på plats, så deras id finns kvar, och saknade läggs in igen.
+Result<void> SystemDb::restoreSeedConductors()
+{
+    return db_.transaction([&]() -> Result<void> {
+        // Stopp om en egen lina har ett namn ur startdatan.
+        {
+            auto clash = db_.prepare(
+                "SELECT c.name FROM conductor c JOIN conductor_seed s "
+                "ON c.name = s.name COLLATE NOCASE WHERE c.seed_key IS NULL ORDER BY c.id LIMIT 1");
+            if (!clash)
+                return clash.error();
+            auto row = clash.value().step();
+            if (!row)
+                return row.error();
+            if (row.value())
+                return makeError(ErrorCode::AlreadyExists,
+                                 "Din egen lina heter som en lina i startdatan:" +
+                                     std::string(1, kNewline) + clash.value().text(0) +
+                                     std::string(2, kNewline) + "Byt namn på den och försök igen.",
+                                 "egen lina med startdatans namn");
+        }
+        // Tillfälliga namn först, så att namnbyten mellan startdatarader inte krockar.
+        if (auto r = db_.exec("UPDATE conductor SET name = char(1) || id "
+                              "WHERE seed_key IN (SELECT seed_key FROM conductor_seed)");
+            !r)
+            return r;
+        // Startdatarader får startdatans värden och user_modified = 0, med oförändrat id.
+        if (auto r = db_.exec(
+                "UPDATE conductor SET (name, type, area_mm2, diameter_mm, e_initial_mpa, "
+                "e_permanent_mpa, e_initial_limit_mpa, eiv_constant, alpha_e6_per_c, "
+                "creep_strain_permille, creep_temp_c, weight_n_per_m, breaking_load_kn, "
+                "sort_order, user_modified) = "
+                "(SELECT s.name, s.type, s.area_mm2, s.diameter_mm, s.e_initial_mpa, "
+                "s.e_permanent_mpa, s.e_initial_limit_mpa, s.eiv_constant, s.alpha_e6_per_c, "
+                "s.creep_strain_permille, s.creep_temp_c, s.weight_n_per_m, s.breaking_load_kn, "
+                "s.sort_order, 0 FROM conductor_seed s WHERE s.seed_key = conductor.seed_key) "
+                "WHERE seed_key IN (SELECT seed_key FROM conductor_seed)");
+            !r)
+            return r;
+        // Saknade startdatalinor läggs in igen.
+        if (auto r = db_.exec(
+                "INSERT INTO conductor (name, type, area_mm2, diameter_mm, e_initial_mpa, "
+                "e_permanent_mpa, e_initial_limit_mpa, eiv_constant, alpha_e6_per_c, "
+                "creep_strain_permille, creep_temp_c, weight_n_per_m, breaking_load_kn, "
+                "sort_order, seed_key, user_modified) "
+                "SELECT name, type, area_mm2, diameter_mm, e_initial_mpa, e_permanent_mpa, "
+                "e_initial_limit_mpa, eiv_constant, alpha_e6_per_c, creep_strain_permille, "
+                "creep_temp_c, weight_n_per_m, breaking_load_kn, sort_order, seed_key, 0 "
+                "FROM conductor_seed WHERE seed_key NOT IN "
+                "(SELECT seed_key FROM conductor WHERE seed_key IS NOT NULL) ORDER BY sort_order");
+            !r)
+            return r;
+        return db_.exec("DELETE FROM conductor_seed_removed");
+    });
 }
 
 } // namespace kalkyl::systemdb

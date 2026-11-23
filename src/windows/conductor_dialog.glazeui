@@ -1,0 +1,116 @@
+// GENERERAD av GlazeBuilder — redigera i GlazeBuilder, inte här.
+// glazeui-design: ui=Slate theme=slate(Windows) style=0 lang=sv
+#include "conductor_dialog.h"
+
+ConductorDialog::ConductorDialog() { initializeComponent(); }
+
+void ConductorDialog::initializeComponent()
+{
+    setTitle("Lindata");
+    setContentSize(1180, 560);
+    setMinimumContentSize(720, 320);
+    setStartPosition(glaze::StartPosition::CenterOwner);
+    setModal(true);
+    setAcceptButton(okBtn);
+    setCancelButton(cancelBtn);
+
+    statusBar.show();
+    statusBar.addPanel("", 0, true);
+
+    infoLbl.name = "infoLbl";
+    infoLbl.setText("Linregistret gäller alla projekt på den här datorn. Ändringarna sparas när du trycker OK.");
+    infoLbl.setRole(glaze::Label::Role::Dim);
+    infoLbl.setWrap(true);
+    infoLbl.x = 16;
+    infoLbl.y = 12;
+    infoLbl.anchors = {true, true, true, false};
+    infoLbl.right = 16;
+
+    cancelBtn.name = "cancelBtn";
+    cancelBtn.setText("Avbryt");
+    cancelBtn.setDialogResult(glaze::DialogResult::Cancel);
+    cancelBtn.width = 96;
+    cancelBtn.anchors = {false, false, true, true};
+    cancelBtn.right = 16;
+    cancelBtn.bottom = 16;
+
+    okBtn.name = "okBtn";
+    okBtn.setText("OK");
+    okBtn.setToolTip("Sparar ändringarna och stänger");
+    okBtn.width = 96;
+    okBtn.anchors = {false, false, true, true};
+    okBtn.anchorRight = {"cancelBtn", 8};
+    okBtn.bottom = 16;
+
+    addBtn.name = "addBtn";
+    addBtn.setText("Lägg till");
+    addBtn.setImg(glaze::stockIcon(glaze::StockIcon::Add));
+    addBtn.setToolTip("Lägger till en lina med värdena från den markerade raden");
+    addBtn.x = 16;
+    addBtn.anchors = {true, false, false, true};
+    addBtn.bottom = 16;
+
+    removeBtn.name = "removeBtn";
+    removeBtn.setText("Ta bort");
+    removeBtn.setImg(glaze::stockIcon(glaze::StockIcon::Remove));
+    removeBtn.anchors = {true, false, false, true};
+    removeBtn.anchorLeft = {"addBtn", 8};
+    removeBtn.bottom = 16;
+
+    restoreBtn.name = "restoreBtn";
+    restoreBtn.setText("Återställ startdata…");
+    restoreBtn.setToolTip("Startdatans linor får SWECO:s värden igen och borttagna kommer tillbaka. Egna linor behålls.");
+    restoreBtn.anchors = {true, false, false, true};
+    restoreBtn.anchorLeft = {"removeBtn", 24};
+    restoreBtn.bottom = 16;
+
+    grid.name = "grid";
+    grid.anchors = {true, true, true, true};
+    grid.x = 16;
+    grid.anchorTop = {"infoLbl", 8};
+    grid.right = 16;
+    grid.anchorBottom = {"cancelBtn", 16};
+    grid.setHeaderLines(2);
+    grid.setSelectionMode(glaze::DataGrid::SelectionMode::FullRow);
+    grid.setSortColumn(0);
+    grid.setSortAscending(false);
+    grid.setColumns({{.text = "Namn", .width = 240, .sizing = glaze::ColumnSizing::Autosize}, {.text = "Typ", .width = 150}, {.text = "Area\nmm²", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Diameter\nmm", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Eik\nMPa", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Ep\nMPa", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "σ max Eik\nMPa", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "k / X\n–", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "α\n10⁻⁶/°C", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "εc\n‰", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Krypning\n°C", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Egentyngd\nN/m", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Brottlast\nkN", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Källa", .sizing = glaze::ColumnSizing::AutoMin}});
+    grid.setColumnEditor(2, {glaze::DataGrid::Editor::Number});
+    grid.setColumnEditor(3, {glaze::DataGrid::Editor::Number});
+    grid.setColumnEditor(4, {glaze::DataGrid::Editor::Number});
+    grid.setColumnEditor(5, {glaze::DataGrid::Editor::Number});
+    grid.setColumnEditor(6, {glaze::DataGrid::Editor::Number});
+    grid.setColumnEditor(7, {glaze::DataGrid::Editor::Number});
+    grid.setColumnEditor(8, {glaze::DataGrid::Editor::Number});
+    grid.setColumnEditor(9, {glaze::DataGrid::Editor::Number});
+    grid.setColumnEditor(10, {glaze::DataGrid::Editor::Number});
+    grid.setColumnEditor(11, {glaze::DataGrid::Editor::Number});
+    grid.setColumnEditor(12, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true, .emptyText = "–"});
+    grid.setColumnEditor(13, {glaze::DataGrid::Editor::None});
+    grid.setColumnToolTip(4, "Initiell E-modul");
+    grid.setColumnToolTip(5, "Permanent E-modul");
+    grid.setColumnToolTip(6, "Högsta spänningen då Eik är giltig");
+    grid.setColumnToolTip(7, "Konstant för beräkning av Eiv (k eller X)");
+    grid.setColumnToolTip(8, "Värmeutvidgningskoefficient");
+    grid.setColumnToolTip(9, "Permanent förlängning pga krypning");
+    grid.setColumnToolTip(10, "Krypningen som temperatur. Räknas om när εc eller α ändras.");
+    grid.setColumnToolTip(12, "Tom om brottlasten saknas");
+    grid.setColumnToolTip(13, "Startdata, Ändrad (startdata du ändrat) eller Egen");
+
+    okBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { okBtnClicked(s, e); };
+    addBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { addBtnClicked(s, e); };
+    removeBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { removeBtnClicked(s, e); };
+    restoreBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { restoreBtnClicked(s, e); };
+    grid.onCommit = [this](glaze::Widget* s, glaze::CellChangeArgs& e) { gridCommitted(s, e); };
+    grid.onSelectionChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { gridSelectionChanged(s, e); };
+    glaze::AppWindow::onLoad = [this](glaze::Widget* s, glaze::EventArgs& e) { onLoad(s, e); };
+    glaze::AppWindow::onClose = [this](glaze::Widget* s, glaze::CloseArgs& e) { onClosing(s, e); };
+
+    root().adopt(infoLbl);
+    root().adopt(cancelBtn);
+    root().adopt(okBtn);
+    root().adopt(addBtn);
+    root().adopt(removeBtn);
+    root().adopt(restoreBtn);
+    root().adopt(grid);
+}

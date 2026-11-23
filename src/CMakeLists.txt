@@ -1,6 +1,7 @@
 # Fönstren i tre-filsmodellen: windows/<bas>.cpp + windows/<bas>.glazeui (kompileras som C++).
 set(KALKYL_WINDOWS "")
 glaze_add_window(KALKYL_WINDOWS
+    windows/conductor_dialog
     windows/main_window
     windows/project_picker)
 

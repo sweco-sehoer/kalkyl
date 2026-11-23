@@ -1,5 +1,5 @@
 # Systemdatabasen: utseendeläge, senaste mapp och senaste projekt, lokalt per användare.
-add_library(kalkyl_systemdb STATIC system_db.cpp)
+add_library(kalkyl_systemdb STATIC system_db.cpp conductor.cpp)
 target_include_directories(kalkyl_systemdb PUBLIC ${PROJECT_SOURCE_DIR}/libs)
 target_link_libraries(kalkyl_systemdb PUBLIC kalkyl_db kalkyl_platform PRIVATE kalkyl_warnings)
 

@@ -9,12 +9,13 @@ Fönstren ligger i `src/windows/`, stödbiblioteken i `libs/`.
 | Del | Katalog | Innehåll |
 |---|---|---|
 | Projektväljare | `src/windows/project_picker.*` | Startfönstret: de 10 senaste projekten, Öppna, Öppna annat projekt…, Nytt projekt… och Ta bort ur listan |
-| Huvudfönster | `src/windows/main_window.*` | Programikon (stor med verktygsfält), menyer och lägesknapp i namnlisten, arbetsyta och statusrad |
+| Huvudfönster | `src/windows/main_window.*` | Programikon (stor med verktygsfält), menyer och lägesknapp i namnlisten, flikarna Dokumentation (uppgifter enligt ByggPM i blått, grönt och gult, beräkningar före i lila och efter i rosa; fas- och topplina ur linregistret) och Stolptabell före och statusrad |
+| Lindata | `src/windows/conductor_dialog.*` | Inställningar > Lindata…: redigera linregistret (lägg till, ta bort, återställ startdata) |
 | Version | `libs/version` | Programmets version som header och versionsresurs för kalkyl.exe |
 | Felmodell | `libs/core` | `Result<T>` och `Error`, som alla bibliotek använder |
 | Plattform | `libs/platform` | Text (UTF-8/UTF-16), system, filer, låsfil och filassociation (Win32) |
 | Databas | `libs/db` | SQLite-anslutning, satser och migrering |
-| Systemdatabas | `libs/systemdb` | Utseendeläge, senaste mapp och senaste projekt, lokalt per användare |
+| Systemdatabas | `libs/systemdb` | Utseendeläge, senaste mapp, senaste projekt och linregistret, lokalt per användare |
 | Projektdatabas | `libs/projectdb` | Projektfilen `.kalkyl`: lokal arbetskopia, lås och säker publicering |
 | Utseende | `libs/appearance` | Slate, temat Windows och lägesknappen, gemensamt för alla toppfönster |
 | Resurser | `res` | Programikonen (källa, `assets.bin`, `kalkyl.ico`) |
@@ -77,50 +78,23 @@ Strukturen är fast. Nya filer läggs där de hör hemma.
 
 ## Data
 
-- **Systemdatabasen** `system.db` ligger lokalt i `%LOCALAPPDATA%\Kalkyl` (eller `KALKYL_DATA_DIR`) och sparar utseendeläge, senaste mapp och senaste projekt.
+- **Systemdatabasen** `system.db` ligger lokalt i `%LOCALAPPDATA%\Kalkyl` (eller `KALKYL_DATA_DIR`) och sparar utseendeläge, senaste mapp, senaste projekt och linregistret. Linregistrets startdata (SWECO:s 129 linor ur Linberäkning.xlsm) ligger i `libs/systemdb/conductor_seed_v1.h`.
 - **Projekt** är en SQLite-fil med ändelsen `.kalkyl`, som kan ligga på en nätverksshare.
   Programmet kopierar den till en lokal arbetskopia vid öppning och skriver tillbaka den bara med atomär publicering. En låsfil visar att projektet är öppet.
 - Avinstallationen rör aldrig systemdatabasen, arbetskopiorna eller projektfilerna.
 - `.kalkyl` associeras per användare med Kalkyl (`kalkyl.exe --registrera` och `--avregistrera`).
-- Detaljer, felmodell och API:er står i `doc/plans/2026-11-20_Grunder.md`.
+- Detaljer, felmodell och API:er står i `doc/plans/archive/2026-11-20_Grunder.md`.
 
-## Planer
+### Migrering mellan versioner
 
-- Filnamnet är alltid `ÅÅÅÅ-MM-DD_<Namn>.md`, utan mellanslag. Ord i namnet skiljs med `_`, t.ex. `2026-11-20_Layout.md` och `2026-11-20_Layout_fas_1.md`.
-- Pågående planer ligger i `doc/plans/`.
-- En plan flyttas till `doc/plans/archive/` när ingen öppen punkt i `TODO.md` länkar till den längre.
+Varje taggad version (t.ex. `v0.1.0`) till nästa taggade version ska alltid migrera både systemdatabasen och projektdatabasen korrekt. Inga data får gå förlorade. Migrering gäller bara mellan taggade versioner.
 
-## TODO.md
-
-`TODO.md` i roten är listan över allt arbete, alla buggar och alla idéer.
-
-- **Status:** varje punkt börjar med en statusglyf. Förklaringen står överst i filen.
-  - ⬜ ej startad
-  - 📝 planeras
-  - 🔨 utförs
-  - 🔍 granskas
-  - ⏸️ väntar
-  - ✅ klar
-  - 🐞 bugg
-  - 💡 idé
-- **Längd:** en punkt är högst 3 rader.
-- **Länk:** arbetspunkter länkar till sin planfil.
-- **Utan planfil:** buggar (🐞) och idéer (💡) har ingen planfil. En idé som blir arbete får en planfil och status ⬜.
-- **Klara punkter:** en punkt som blir ✅ tas bort från listan. Är den sista punkten för en plan klar arkiveras planfilen.
-- **Ordning:** punkterna står under rubrikerna Arbete, Buggar och Idéer, i prioritetsordning.
-
-## CLAUDE.md
-
-- Varje katalog har en `CLAUDE.md`.
-- Den här filen beskriver projektet i stort.
-- I underkatalogerna beskriver `CLAUDE.md` bara den katalogens egna filer.
-- Uppdatera katalogens `CLAUDE.md` när filer läggs till, tas bort eller byter syfte.
-
-## Kommentarer i källkod
-
-- Varje funktion, klass och logisk del har en kommentar på 2–5 rader.
-- Inline-kommentarer är korta och säger bara vad som händer.
-- Ingen historik i kommentarer (vad som ändrats, vem, när, tidigare beteende). Sådant hör hemma i git.
+- **Före första taggade versionen** finns ingen migrering: schemat ändras direkt i steg 1. Lokala utvecklingsdatabaser (`system.db`, testprojekt) tas bort och skapas om.
+- Schemat versioneras med `PRAGMA user_version`. Efter en taggad version är varje ändring ett nytt steg sist i stegen (`db::Schema::steps`), och de stegen körs av `db::migrate`.
+- Ändringar mellan två taggar samlas i ETT steg per databas, som kan ändras fritt tills nästa tagg sätts.
+- Ett steg som har funnits i en taggad version ändras aldrig. Fel rättas med ett nytt steg.
+- Varje schemaändring har ett test som skapar databasen som den såg ut i den förra taggade versionen, öppnar den med den nya koden och kontrollerar att alla data finns kvar och att de nya delarna är på plats.
+- Startdata som följer med ett steg, t.ex. lindata, läggs in av steget. Användarens egna ändringar skrivs aldrig över av en senare migrering.
 
 ## Fönster
 
@@ -133,31 +107,11 @@ Strukturen är fast. Nya filer läggs där de hör hemma.
 - Utseendet är Slate med temat Windows. Det sätts i varje toppfönsters `onLoad` via `kalkyl::appearance::apply`, och varje `.glazeui` har designraden `// glazeui-design: ui=Slate theme=slate(Windows) style=0 lang=sv`.
 - Fönster ska gå att öppna i GlazeBuilder och förhandsgranskas. Inga handkodade layouter utanför `.glazeui`.
 
-## Arbetsflöde med agenter
+## Arbetssätt
 
-Huvudagenten är samordnare: den fördelar arbetet, startar agenterna, följer upp och rapporterar till användaren.
+Arbetsflödet med agenter, planer, `TODO.md`, CLAUDE.md per katalog, kommentarer, versioner, filredigering och git
+står i den globala `~/.claude/CLAUDE.md`. Här står bara det som är särskilt för Kalkyl:
 
-| Roll | Modell | Effort | Antal |
-|---|---|---|---|
-| Planering | Opus | xhigh | högst 1 |
-| Implementering | Sonnet | high | högst 4 samtidigt |
-| Granskning | Opus | high | 1 |
-
-- Planeringsagenten skriver planen i `doc/plans/`. Implementeringen följer planen.
-- Implementeringsagenterna får egna filer att äga, så att de inte skriver i samma filer samtidigt.
-- Efter implementeringen testar användaren först. Granskningen startar först när användaren säger till, så att ändringar från testet kommer med.
-- Granskningsagenten granskar det som implementerats mot planen och reglerna i den här filen.
-- Små fixar efter granskningen gör samordnaren själv.
-  Större fixar går tillbaka till den Sonnet-agent som skrev koden.
-- Ingen commit, varken lokalt eller till remoten, förrän användaren säger till.
-
-## Versioner
-
-Formatet är `major.minor.patch`. Versionen står bara i `project(VERSION ...)` i rotens `CMakeLists.txt`.
-
-**Versionen ändras bara när användaren säger till.** Planer och agenter höjer den aldrig själva.
-setup.exe och versionsresursen i kalkyl.exe får versionen ur `project(VERSION)`.
-
-- **major**: höjs när programmet är klart (1.0.0).
-- **minor**: nya funktioner och API-brytande ändringar.
-- **patch**: fixar och små ändringar, t.ex. i layout.
+- **Byggkataloger:** huvudkatalogen är `build/` (presetet `debug`). Implementeringsagenternas egna kataloger
+  konfigureras med `-DFETCHCONTENT_SOURCE_DIR_GLAZEUI=C:/Users/sehoer/Source/Kalkyl/build/_deps/glazeui-src`, så att GlazeUI inte klonas igen.
+- **Versionen** står bara i `project(VERSION ...)` i rotens `CMakeLists.txt`. setup.exe och versionsresursen i kalkyl.exe får versionen därifrån.

@@ -14,7 +14,7 @@ exporterar `libs/` som include-katalog. Namnrymderna heter `kalkyl::core`, `kalk
 | `core/` | Felmodellen `Result<T>` och `Error` (`kalkyl_core`, INTERFACE) |
 | `platform/` | Win32-nära hjälpmedel: text, system, filer, låsfil och filassociation (`kalkyl_platform`) |
 | `db/` | SQLite-lagret: `Database`, `Statement` och `migrate` (`kalkyl_db`) |
-| `systemdb/` | Systemdatabasen med inställningar och senaste projekt (`kalkyl_systemdb`) |
+| `systemdb/` | Systemdatabasen med inställningar, senaste projekt och linregistret med startdata (`kalkyl_systemdb`) |
 | `projectdb/` | Projektdatabasen med arbetskopia, lås och publicering (`kalkyl_projectdb`) |
 | `appearance/` | Utseende och lägesknapp för GlazeUI-fönstren (`kalkyl_appearance`) |
 

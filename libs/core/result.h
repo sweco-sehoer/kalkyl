@@ -21,6 +21,7 @@ enum class ErrorCode {
     Cancelled,         // avbrutet via stop_token
     Io,                // övriga fil- och nätverksfel
     Sql,               // övriga SQLite-fel (tyder på programfel)
+    Invalid,           // ett värde är ogiltigt, t.ex. ett tomt namn (anroparen har inte validerat)
 };
 
 // Ett fel: koden, en svensk text till användaren och en teknisk detalj till loggen.

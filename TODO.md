@@ -26,6 +26,11 @@
 
 ## Idéer
 
+- 💡 Spara flikarna Dokumentation och Stolptabell före i projektdatabasen. I dag är värdena mockupens förval
+  i `main_window.cpp` och gäller bara medan projektet är öppet.
+- 💡 Spara fas- och topplinan i projektet som en kopia av linans data (inte id), med "Uppdatera från linregistret".
+  Se doc/plans/archive/2026-11-23_Lindata.md, avsnitt 2.10.
+- 💡 Flytta `Conductor` ur systemdb till ett eget bibliotek när projectdb eller beräkningarna behöver den.
 - 💡 Kodsignering av setup.exe, avinstallera.exe och kalkyl.exe med SWECO:s certifikat (SmartScreen, AppLocker).
   Se doc/plans/2026-11-20_Installation.md, avsnitt 10.
 - 💡 Nytt och Öppna projekt direkt i huvudfönstret, utan att gå via väljaren.

@@ -7,7 +7,7 @@ MainWindow::MainWindow() { initializeComponent(); }
 void MainWindow::initializeComponent()
 {
     setTitle("Kalkyl");
-    setContentSize(1024, 640);
+    setContentSize(1280, 800);
     setMinimumSize(640, 400);
     setStartPosition(glaze::StartPosition::CenterScreen);
 
@@ -21,6 +21,8 @@ void MainWindow::initializeComponent()
     menuBar.addItem("Arkiv", "Stäng projekt", "Ctrl+W");
     menuBar.addSeparator("Arkiv");
     menuBar.addItem("Arkiv", "Avsluta", "Alt+F4");
+    menuBar.addMenu("Inställningar");
+    menuBar.addItem("Inställningar", "Lindata…");
     menuBar.addMenu("Hjälp");
     menuBar.addItem("Hjälp", "Om Kalkyl");
 
@@ -33,8 +35,128 @@ void MainWindow::initializeComponent()
     themeBtn.setToolTip("Utseende: System");
     themeBtn.dock = glaze::Dock::Right;
 
+    flikar.name = "flikar";
+    flikar.dock = glaze::Dock::Fill;
+
+    byggPmSida.name = "byggPmSida";
+    byggPmSida.setText("Dokumentation");
+
+    stolpSida.name = "stolpSida";
+    stolpSida.setText("Stolptabell före");
+
+    byggPmPanel.name = "byggPmPanel";
+    byggPmPanel.dock = glaze::Dock::Fill;
+
+    stolpPanel.name = "stolpPanel";
+    stolpPanel.dock = glaze::Dock::Fill;
+
+    byggPmRubrik.name = "byggPmRubrik";
+    byggPmRubrik.setText("Enligt ByggPM");
+    byggPmRubrik.setRole(glaze::Label::Role::Heading);
+    byggPmRubrik.x = 16;
+    byggPmRubrik.y = 12;
+
+    byggPmBla.name = "byggPmBla";
+    byggPmBla.setText("■");
+    byggPmBla.setColor(gfx::Color{60, 130, 210, 255});
+    byggPmBla.setToolTip("Linor och konfiguration");
+    byggPmBla.anchorLeft = {"byggPmRubrik", 12};
+    byggPmBla.y = 18;
+
+    byggPmGron.name = "byggPmGron";
+    byggPmGron.setText("■");
+    byggPmGron.setColor(gfx::Color{70, 170, 90, 255});
+    byggPmGron.setToolTip("Uppspänning och normalspann");
+    byggPmGron.anchorLeft = {"byggPmBla", 6};
+    byggPmGron.y = 18;
+
+    byggPmGul.name = "byggPmGul";
+    byggPmGul.setText("■");
+    byggPmGul.setColor(gfx::Color{220, 160, 40, 255});
+    byggPmGul.setToolTip("Temperatur");
+    byggPmGul.anchorLeft = {"byggPmGron", 6};
+    byggPmGul.y = 18;
+
+    byggPmFore.name = "byggPmFore";
+    byggPmFore.setText("Före");
+    byggPmFore.setRole(glaze::Label::Role::Heading);
+    byggPmFore.anchorLeft = {"byggPmGul", 24};
+    byggPmFore.y = 12;
+
+    byggPmLila.name = "byggPmLila";
+    byggPmLila.setText("■");
+    byggPmLila.setColor(gfx::Color{150, 100, 210, 255});
+    byggPmLila.setToolTip("Beräkningar före ombyggnation");
+    byggPmLila.anchorLeft = {"byggPmFore", 12};
+    byggPmLila.y = 18;
+
+    byggPmEfter.name = "byggPmEfter";
+    byggPmEfter.setText("Efter");
+    byggPmEfter.setRole(glaze::Label::Role::Heading);
+    byggPmEfter.anchorLeft = {"byggPmLila", 24};
+    byggPmEfter.y = 12;
+
+    byggPmRosa.name = "byggPmRosa";
+    byggPmRosa.setText("■");
+    byggPmRosa.setColor(gfx::Color{210, 90, 140, 255});
+    byggPmRosa.setToolTip("Beräkningar efter ombyggnation");
+    byggPmRosa.anchorLeft = {"byggPmEfter", 12};
+    byggPmRosa.y = 18;
+
+    byggPmGrid.name = "byggPmGrid";
+    byggPmGrid.anchors = {true, true, true, true};
+    byggPmGrid.x = 16;
+    byggPmGrid.anchorTop = {"byggPmRubrik", 8};
+    byggPmGrid.right = 16;
+    byggPmGrid.bottom = 8;
+    byggPmGrid.setColumns({{.text = "Uppgift", .width = 300, .sizing = glaze::ColumnSizing::Autosize}, {.text = "Värde", .width = 312}, {.text = "Referens", .width = 168}});
+
+    stolpRubrik.name = "stolpRubrik";
+    stolpRubrik.setText("Data enligt dokumentation");
+    stolpRubrik.setRole(glaze::Label::Role::Heading);
+    stolpRubrik.x = 16;
+    stolpRubrik.y = 8;
+
+    stolpGrid.name = "stolpGrid";
+    stolpGrid.anchors = {true, true, true, true};
+    stolpGrid.x = 16;
+    stolpGrid.anchorTop = {"stolpRubrik", 8};
+    stolpGrid.right = 16;
+    stolpGrid.bottom = 16;
+    stolpGrid.setHeaderLines(2);
+    stolpGrid.setColumns({{.text = "Stolpplats", .width = 120, .sizing = glaze::ColumnSizing::Autosize}, {.text = "Av", .width = 70, .align = glaze::Align::Right}, {.text = "Ah", .width = 70, .align = glaze::Align::Right}, {.text = "Spannlängd\nföreg.", .width = 90, .align = glaze::Align::Right}, {.text = "Koordinat\nN", .width = 120, .align = glaze::Align::Right}, {.text = "Koordinat\nE", .width = 110, .align = glaze::Align::Right}, {.text = "Koordinat\nH", .width = 80, .align = glaze::Align::Right}, {.text = "LKL", .width = 80}});
+    stolpGrid.setColumnEditor(1, {glaze::DataGrid::Editor::Number});
+    stolpGrid.setColumnEditor(2, {glaze::DataGrid::Editor::Number});
+    stolpGrid.setColumnEditor(3, {glaze::DataGrid::Editor::Number});
+    stolpGrid.setColumnEditor(4, {.editor = glaze::DataGrid::Editor::Number, .decimals = 2});
+    stolpGrid.setColumnEditor(5, {.editor = glaze::DataGrid::Editor::Number, .decimals = 2});
+    stolpGrid.setColumnEditor(6, {.editor = glaze::DataGrid::Editor::Number, .decimals = 2});
+    stolpGrid.addRow({"ST0378", "363", "362", "348", "6512240.85", "412181.98", "44.19", "255/262"});
+    stolpGrid.addRow({"ST0379", "267", "320", "375", "6511904.92", "412013.87", "28.05", ""});
+    stolpGrid.addRow({"ST0380", "344", "345", "264", "6511653.69", "411933.25", "22.27", "262/262"});
+    stolpGrid.addRow({"ST0381", "344", "374", "427", "6511247.08", "411804.35", "30.01", "262/262"});
+    stolpGrid.addRow({"ST0382", "378", "305", "322", "6510940.33", "411706.06", "48.54", ""});
+    stolpGrid.addRow({"ST0383", "181", "300", "287", "6510691.90", "411562.70", "42.00", "241/241"});
+
     themeBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { themeBtnClicked(s, e); };
+    byggPmGrid.onCommit = [this](glaze::Widget* s, glaze::CellChangeArgs& e) { byggPmGridCommitted(s, e); };
     glaze::AppWindow::onLoad = [this](glaze::Widget* s, glaze::EventArgs& e) { onLoad(s, e); };
 
     topBar.adopt(themeBtn);
+    root().adopt(flikar);
+    flikar.adopt(byggPmSida);
+    flikar.adopt(stolpSida);
+    byggPmSida.adopt(byggPmPanel);
+    stolpSida.adopt(stolpPanel);
+    byggPmPanel.adopt(byggPmRubrik);
+    byggPmPanel.adopt(byggPmBla);
+    byggPmPanel.adopt(byggPmGron);
+    byggPmPanel.adopt(byggPmGul);
+    byggPmPanel.adopt(byggPmFore);
+    byggPmPanel.adopt(byggPmLila);
+    byggPmPanel.adopt(byggPmEfter);
+    byggPmPanel.adopt(byggPmRosa);
+    byggPmPanel.adopt(byggPmGrid);
+    stolpPanel.adopt(stolpRubrik);
+    stolpPanel.adopt(stolpGrid);
 }

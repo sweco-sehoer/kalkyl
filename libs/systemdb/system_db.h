@@ -1,10 +1,12 @@
 #pragma once
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "core/result.h"
 #include "db/database.h"
+#include "systemdb/conductor.h"
 
 namespace kalkyl::systemdb {
 
@@ -43,6 +45,23 @@ public:
     core::Result<std::vector<RecentProject>> recentProjects();   // senast först, högst kMaxRecent
     core::Result<void> touchRecentProject(const std::string& path, const std::string& name);
     core::Result<void> removeRecentProject(const std::string& path);   // via pathKey
+
+    // Linregistret i registrets ordning (sort_order, id).
+    core::Result<std::vector<Conductor>> conductors();
+    // En lina. Tomt svar om id saknas.
+    core::Result<std::optional<Conductor>> conductor(std::int64_t id);
+    // Lägger till (id 0) eller uppdaterar och svarar med id. Namn och typ trimmas.
+    // Fel: Invalid, AlreadyExists (namnet finns, NOCASE), NotFound (id saknas), Sql.
+    core::Result<std::int64_t> saveConductor(const Conductor& c);
+    // Tar bort en lina. En startdatalina skrivs i conductor_seed_removed. Saknat id är inget fel.
+    core::Result<void> removeConductor(std::int64_t id);
+    // Fönstrets sparning i EN transaktion: borttagningar, sedan uppdateringar och nya linor.
+    // Två linor får byta namn med varandra. Felen som saveConductor; vid fel sparas inget.
+    core::Result<void> saveConductors(const std::vector<Conductor>& upserts,
+                                      const std::vector<std::int64_t>& removals);
+    // Startdatan tillbaka enligt planen 2.7. Egna linor behålls, id på startdatarader behålls.
+    // Fel: AlreadyExists (en egen lina har ett namn ur startdatan), Sql.
+    core::Result<void> restoreSeedConductors();
 private:
     SystemDb(db::Database database, std::string fallbackReason);
     std::string setting(const char* key);
