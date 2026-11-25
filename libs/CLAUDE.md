@@ -4,6 +4,8 @@ Stödbibliotek. En katalog per bibliotek, som heter `kalkyl_<namn>`.
 Fönster hör inte hit utan till `src/windows/`.
 
 Beroendena går åt ett håll: `core` ← `platform` ← `db` ← `systemdb`/`projectdb` ← `appearance`.
+`conductor` och `calc` beror bara på standardbiblioteket, `systemdb` beror på `db` och `conductor`,
+och `projectdb` beror på `db`, `calc` och `conductor`.
 Includes skrivs som `"core/result.h"`, `"platform/files.h"` och så vidare, och varje bibliotek
 exporterar `libs/` som include-katalog. Namnrymderna heter `kalkyl::core`, `kalkyl::platform` osv.
 
@@ -12,6 +14,8 @@ exporterar `libs/` som include-katalog. Namnrymderna heter `kalkyl::core`, `kalk
 | `CMakeLists.txt` | Tar in varje bibliotek med `add_subdirectory`, i beroendeordning |
 | `version/` | Programmets version som header och versionsresurs för kalkyl.exe (`kalkyl_version`) |
 | `core/` | Felmodellen `Result<T>` och `Error` (`kalkyl_core`, INTERFACE) |
+| `conductor/` | Linan som typ (`Conductor`) och valideringen, gemensam för systemdatabasen och projektdatabasen (`kalkyl_conductor`) |
+| `calc/` | Normalspannsberäkningen och tabelltext (tal, urklipp, inklistring) som rena funktioner (`kalkyl_calc`) |
 | `platform/` | Win32-nära hjälpmedel: text, system, filer, låsfil och filassociation (`kalkyl_platform`) |
 | `db/` | SQLite-lagret: `Database`, `Statement` och `migrate` (`kalkyl_db`) |
 | `systemdb/` | Systemdatabasen med inställningar, senaste projekt och linregistret med startdata (`kalkyl_systemdb`) |

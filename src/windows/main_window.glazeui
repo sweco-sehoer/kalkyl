@@ -18,16 +18,29 @@ void MainWindow::initializeComponent()
     menuBar.setInTitleBar(true);
     menuBar.show();
     menuBar.addMenu("Arkiv");
+    menuBar.addItem("Arkiv", "Spara", "Ctrl+S");
+    menuBar.addSeparator("Arkiv");
     menuBar.addItem("Arkiv", "Stäng projekt", "Ctrl+W");
     menuBar.addSeparator("Arkiv");
     menuBar.addItem("Arkiv", "Avsluta", "Alt+F4");
     menuBar.addMenu("Inställningar");
     menuBar.addItem("Inställningar", "Lindata…");
+    menuBar.addSeparator("Inställningar");
+    menuBar.addSubmenu("Inställningar", "Automatisk sparning");
+    menuBar.addRadio({"Inställningar", "Automatisk sparning"}, "Av");
+    menuBar.addRadio({"Inställningar", "Automatisk sparning"}, "1 minut");
+    menuBar.addRadio({"Inställningar", "Automatisk sparning"}, "5 minuter", true);
+    menuBar.addRadio({"Inställningar", "Automatisk sparning"}, "10 minuter");
+    menuBar.addRadio({"Inställningar", "Automatisk sparning"}, "15 minuter");
+    menuBar.addRadio({"Inställningar", "Automatisk sparning"}, "30 minuter");
     menuBar.addMenu("Hjälp");
     menuBar.addItem("Hjälp", "Om Kalkyl");
 
     statusBar.show();
     statusBar.addPanel("Redo", 0, true);
+
+    autosaveTimer.name = "autosaveTimer";
+    autosaveTimer.setInterval(300000);
 
     themeBtn.name = "themeBtn";
     themeBtn.setGlyphOnly(true);
@@ -44,11 +57,17 @@ void MainWindow::initializeComponent()
     stolpSida.name = "stolpSida";
     stolpSida.setText("Stolptabell före");
 
+    nsSida.name = "nsSida";
+    nsSida.setText("Normalspann");
+
     byggPmPanel.name = "byggPmPanel";
     byggPmPanel.dock = glaze::Dock::Fill;
 
     stolpPanel.name = "stolpPanel";
     stolpPanel.dock = glaze::Dock::Fill;
+
+    nsPanel.name = "nsPanel";
+    nsPanel.dock = glaze::Dock::Fill;
 
     byggPmRubrik.name = "byggPmRubrik";
     byggPmRubrik.setText("Enligt ByggPM");
@@ -138,16 +157,67 @@ void MainWindow::initializeComponent()
     stolpGrid.addRow({"ST0382", "378", "305", "322", "6510940.33", "411706.06", "48.54", ""});
     stolpGrid.addRow({"ST0383", "181", "300", "287", "6510691.90", "411562.70", "42.00", "241/241"});
 
+    nsRubrik.name = "nsRubrik";
+    nsRubrik.setText("Normalspannsberäkningar");
+    nsRubrik.setRole(glaze::Label::Role::Heading);
+    nsRubrik.x = 16;
+    nsRubrik.y = 8;
+
+    nsNyBtn.name = "nsNyBtn";
+    nsNyBtn.setText("Ny beräkning…");
+    nsNyBtn.setImg(glaze::stockIcon(glaze::StockIcon::Add));
+    nsNyBtn.x = 16;
+    nsNyBtn.anchorTop = {"nsRubrik", 8};
+
+    nsAndraBtn.name = "nsAndraBtn";
+    nsAndraBtn.setText("Ändra…");
+    nsAndraBtn.setImg(glaze::stockIcon(glaze::StockIcon::Edit));
+    nsAndraBtn.anchorLeft = {"nsNyBtn", 8};
+    nsAndraBtn.anchorTop = {"nsRubrik", 8};
+
+    nsKopieraBtn.name = "nsKopieraBtn";
+    nsKopieraBtn.setText("Kopiera…");
+    nsKopieraBtn.setImg(glaze::stockIcon(glaze::StockIcon::Duplicate));
+    nsKopieraBtn.anchorLeft = {"nsAndraBtn", 8};
+    nsKopieraBtn.anchorTop = {"nsRubrik", 8};
+
+    nsTaBortBtn.name = "nsTaBortBtn";
+    nsTaBortBtn.setText("Ta bort");
+    nsTaBortBtn.setImg(glaze::stockIcon(glaze::StockIcon::Remove));
+    nsTaBortBtn.anchorLeft = {"nsKopieraBtn", 8};
+    nsTaBortBtn.anchorTop = {"nsRubrik", 8};
+
+    nsLista.name = "nsLista";
+    nsLista.anchors = {true, true, true, true};
+    nsLista.x = 16;
+    nsLista.anchorTop = {"nsNyBtn", 8};
+    nsLista.right = 16;
+    nsLista.bottom = 16;
+    nsLista.setHeaderLines(2);
+    nsLista.setColumns({{.text = "Från", .width = 90}, {.text = "Till", .width = 90}, {.text = "Spann", .width = 60, .align = glaze::Align::Right}, {.text = "Totallängd\nm", .width = 90, .align = glaze::Align::Right}, {.text = "aₙ\nm", .width = 70, .align = glaze::Align::Right}, {.text = "aₙ,ΔH\nm", .width = 70, .align = glaze::Align::Right}, {.text = "Avvikelser", .width = 90, .align = glaze::Align::Right}, {.text = "Dokumentation", .width = 170}, {.text = "Anteckning", .width = 200, .sizing = glaze::ColumnSizing::Autosize}});
+
     themeBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { themeBtnClicked(s, e); };
     byggPmGrid.onCommit = [this](glaze::Widget* s, glaze::CellChangeArgs& e) { byggPmGridCommitted(s, e); };
+    byggPmGrid.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { byggPmGridContextMenu(s, e); };
+    nsNyBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsNyBtnClicked(s, e); };
+    nsAndraBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsAndraBtnClicked(s, e); };
+    nsKopieraBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsKopieraBtnClicked(s, e); };
+    nsTaBortBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsTaBortBtnClicked(s, e); };
+    nsLista.onActivate = [this](glaze::Widget* s, glaze::ActivateArgs& e) { nsListaActivated(s, e); };
+    nsLista.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { nsListaChanged(s, e); };
+    nsLista.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { nsListaContextMenu(s, e); };
+    autosaveTimer.onTick = [this](glaze::Timer* s, glaze::TimerArgs& e) { autosaveTimerTick(s, e); };
     glaze::AppWindow::onLoad = [this](glaze::Widget* s, glaze::EventArgs& e) { onLoad(s, e); };
+    glaze::AppWindow::onClose = [this](glaze::Widget* s, glaze::CloseArgs& e) { onClosing(s, e); };
 
     topBar.adopt(themeBtn);
     root().adopt(flikar);
     flikar.adopt(byggPmSida);
     flikar.adopt(stolpSida);
+    flikar.adopt(nsSida);
     byggPmSida.adopt(byggPmPanel);
     stolpSida.adopt(stolpPanel);
+    nsSida.adopt(nsPanel);
     byggPmPanel.adopt(byggPmRubrik);
     byggPmPanel.adopt(byggPmBla);
     byggPmPanel.adopt(byggPmGron);
@@ -159,4 +229,10 @@ void MainWindow::initializeComponent()
     byggPmPanel.adopt(byggPmGrid);
     stolpPanel.adopt(stolpRubrik);
     stolpPanel.adopt(stolpGrid);
+    nsPanel.adopt(nsRubrik);
+    nsPanel.adopt(nsNyBtn);
+    nsPanel.adopt(nsAndraBtn);
+    nsPanel.adopt(nsKopieraBtn);
+    nsPanel.adopt(nsTaBortBtn);
+    nsPanel.adopt(nsLista);
 }

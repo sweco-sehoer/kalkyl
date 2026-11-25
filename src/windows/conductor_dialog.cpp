@@ -13,9 +13,9 @@
 
 namespace {
 
-using kalkyl::systemdb::Conductor;
-using kalkyl::systemdb::ConductorField;
-using kalkyl::systemdb::ConductorOrigin;
+using kalkyl::conductor::Conductor;
+using kalkyl::conductor::ConductorField;
+using kalkyl::conductor::ConductorOrigin;
 
 // Kolumnernas index i tabellen: namn och typ, talen D–M, brottlasten och Källa.
 constexpr int kColName = 0;
@@ -171,7 +171,7 @@ void ConductorDialog::fillGrid()
 
 // Bygger en lina av radens celler. Ett tal som saknas eller är otolkbart blir NaN,
 // så att valideringen fångar det. Id och ursprung kommer ur rowIds_ och loaded_.
-kalkyl::systemdb::Conductor ConductorDialog::rowConductor(int row) const
+kalkyl::conductor::Conductor ConductorDialog::rowConductor(int row) const
 {
     Conductor c;
     c.id = rowIds_[static_cast<std::size_t>(row)];
@@ -204,7 +204,7 @@ void ConductorDialog::markRow(int row)
     }
 
     const Conductor c = rowConductor(row);
-    const auto issues = kalkyl::systemdb::validateConductor(c);
+    const auto issues = kalkyl::conductor::validateConductor(c);
     bool creepInvalid = false;
     for (const auto& issue : issues) {
         const int col = columnOf(issue.field);
@@ -217,8 +217,8 @@ void ConductorDialog::markRow(int row)
                        issue.field == ConductorField::CreepTemp;
     }
 
-    if (!creepInvalid && kalkyl::systemdb::creepTempDeviates(c)) {
-        const auto derived = kalkyl::systemdb::derivedCreepTempC(c.creepStrainPermille, c.alphaE6PerC);
+    if (!creepInvalid && kalkyl::conductor::creepTempDeviates(c)) {
+        const auto derived = kalkyl::conductor::derivedCreepTempC(c.creepStrainPermille, c.alphaE6PerC);
         grid.setCellColor(row, kColCreepTemp, kWarnColor, std::nullopt);
         grid.setCellToolTip(row, kColCreepTemp,
                             "Avviker från εc/α = " + (derived ? commaText(*derived) : std::string("?")) + " °C");
@@ -227,7 +227,7 @@ void ConductorDialog::markRow(int row)
     const Conductor* old = findLoaded(loaded_, c.id);
     const bool own = !old || old->origin == ConductorOrigin::Own;
     const bool modified = old && (old->origin == ConductorOrigin::SeedModified ||
-                                  !kalkyl::systemdb::sameConductorValues(c, *old));
+                                  !kalkyl::conductor::sameConductorValues(c, *old));
     grid.setCell(row, kColSource, own ? "Egen" : (modified ? "Ändrad" : "Startdata"));
 }
 
@@ -240,7 +240,7 @@ void ConductorDialog::markNames()
         markRow(i);
     for (int i = 0; i < count; ++i) {
         for (int j = 0; j < count; ++j) {
-            if (i != j && kalkyl::systemdb::sameConductorName(grid.cell(i, kColName), grid.cell(j, kColName))) {
+            if (i != j && kalkyl::conductor::sameConductorName(grid.cell(i, kColName), grid.cell(j, kColName))) {
                 grid.setCellColor(i, kColName, kErrorColor, std::nullopt);
                 grid.setCellToolTip(i, kColName, "Namnet finns på en annan rad");
                 break;
@@ -258,7 +258,7 @@ void ConductorDialog::gridCommitted(glaze::Widget*, glaze::CellChangeArgs& e)
         const auto k = grid.numberValue(e.row, kColCreepStrain);
         const auto a = grid.numberValue(e.row, kColAlpha);
         if (k && a) {
-            if (const auto derived = kalkyl::systemdb::derivedCreepTempC(*k, *a))
+            if (const auto derived = kalkyl::conductor::derivedCreepTempC(*k, *a))
                 grid.setCell(e.row, kColCreepTemp, numText(std::round(*derived * 10.0) / 10.0));
         }
     }
@@ -295,7 +295,7 @@ void ConductorDialog::addBtnClicked(glaze::Widget*, glaze::ClickArgs&)
     for (int n = 2;; ++n) {
         bool taken = false;
         for (int i = 0; i < grid.rowCount() && !taken; ++i)
-            taken = kalkyl::systemdb::sameConductorName(grid.cell(i, kColName), name);
+            taken = kalkyl::conductor::sameConductorName(grid.cell(i, kColName), name);
         if (!taken)
             break;
         name = "Ny lina " + std::to_string(n);
@@ -424,13 +424,13 @@ bool ConductorDialog::saveChanges()
                                 "Linan \"" + c.name + "\" har ett ogiltigt tal i kolumnen " +
                                     kColumnNames[col] + ". Rätta det eller tryck Esc i cellen."});
         }
-        for (const auto& issue : kalkyl::systemdb::validateConductor(c)) {
+        for (const auto& issue : kalkyl::conductor::validateConductor(c)) {
             const int col = columnOf(issue.field);
             if (!reported[static_cast<std::size_t>(col)])
                 problems.push_back({row, col, prefix + issue.message});
         }
         for (int other = 0; other < row; ++other) {
-            if (kalkyl::systemdb::sameConductorName(c.name, grid.cell(other, kColName))) {
+            if (kalkyl::conductor::sameConductorName(c.name, grid.cell(other, kColName))) {
                 problems.push_back({row, kColName, prefix + "Namnet finns på en annan rad."});
                 break;
             }
@@ -452,7 +452,7 @@ bool ConductorDialog::saveChanges()
     for (int row = 0; row < count; ++row) {
         const Conductor c = rowConductor(row);
         const Conductor* old = findLoaded(loaded_, c.id);
-        if (!old || !kalkyl::systemdb::sameConductorValues(c, *old))
+        if (!old || !kalkyl::conductor::sameConductorValues(c, *old))
             upserts.push_back(c);
     }
     const auto result = sys_->saveConductors(upserts, removedIds_);

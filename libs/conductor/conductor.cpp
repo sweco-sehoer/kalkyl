@@ -1,8 +1,8 @@
-#include "systemdb/conductor.h"
+#include "conductor/conductor.h"
 
 #include <cmath>
 
-namespace kalkyl::systemdb {
+namespace kalkyl::conductor {
 
 namespace {
 
@@ -41,6 +41,12 @@ void requireNonNegative(std::vector<ConductorIssue>& issues, ConductorField fiel
 bool sameNumber(double a, double b)
 {
     return a == b;
+}
+
+// Sant när ett siffertecken, '0'-'9'.
+bool isDigit(char c)
+{
+    return c >= '0' && c <= '9';
 }
 
 } // namespace
@@ -100,11 +106,11 @@ bool sameConductorName(std::string_view a, std::string_view b)
     return true;
 }
 
-// Sant när namn, typ och alla värden är lika. id och ursprung hör inte till värdena.
-// Används för att se om en rad ändrats och behöver sparas.
-bool sameConductorValues(const Conductor& a, const Conductor& b)
+// Sant när typ och alla värden är lika. Namn, id och ursprung hör inte till uppgifterna.
+// Används för att se om projektets kopia skiljer sig från linregistret.
+bool sameConductorData(const Conductor& a, const Conductor& b)
 {
-    if (a.name != b.name || a.type != b.type)
+    if (a.type != b.type)
         return false;
     if (a.breakingLoadKn.has_value() != b.breakingLoadKn.has_value())
         return false;
@@ -118,4 +124,43 @@ bool sameConductorValues(const Conductor& a, const Conductor& b)
            sameNumber(a.creepTempC, b.creepTempC) && sameNumber(a.weightNPerM, b.weightNPerM);
 }
 
-} // namespace kalkyl::systemdb
+// Sant när namn, typ och alla värden är lika. id och ursprung hör inte till värdena.
+// Används för att se om en rad ändrats och behöver sparas.
+bool sameConductorValues(const Conductor& a, const Conductor& b)
+{
+    return a.name == b.name && sameConductorData(a, b);
+}
+
+// Naturlig jämförelse: siffror jämförs som tal (utan inledande nollor), övriga tecken ett
+// i taget med ASCII-versaler vikta. Svarar <0, 0 eller >0.
+int compareNames(std::string_view a, std::string_view b)
+{
+    std::size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        if (isDigit(a[i]) && isDigit(b[j])) {
+            while (i < a.size() && a[i] == '0') ++i;   // inledande nollor räknas inte
+            while (j < b.size() && b[j] == '0') ++j;
+            std::size_t ei = i, ej = j;
+            while (ei < a.size() && isDigit(a[ei])) ++ei;
+            while (ej < b.size() && isDigit(b[ej])) ++ej;
+            if (ei - i != ej - j)
+                return (ei - i < ej - j) ? -1 : 1;     // fler siffror = större tal
+            if (int c = a.compare(i, ei - i, b.substr(j, ej - j)); c != 0)
+                return c;
+            i = ei;
+            j = ej;
+            continue;
+        }
+        const unsigned char ca = static_cast<unsigned char>(asciiLower(a[i]));
+        const unsigned char cb = static_cast<unsigned char>(asciiLower(b[j]));
+        if (ca != cb)
+            return ca < cb ? -1 : 1;
+        ++i;
+        ++j;
+    }
+    if (i < a.size()) return 1;
+    if (j < b.size()) return -1;
+    return 0;
+}
+
+} // namespace kalkyl::conductor

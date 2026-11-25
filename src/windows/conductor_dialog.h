@@ -72,7 +72,7 @@ private:
 
     // Bygger en lina av radens celler. Ett tal som saknas eller inte går att tolka blir NaN.
     // Id och ursprung hämtas ur rowIds_ och loaded_.
-    kalkyl::systemdb::Conductor rowConductor(int row) const;
+    kalkyl::conductor::Conductor rowConductor(int row) const;
 
     // Markerar felen på en rad: röda celler, bärnsten för avvikande krypning, tooltips och Källa.
     // Giltiga celler får sina färger nollade.
@@ -93,7 +93,7 @@ private:
     void updateButtons();
 
     kalkyl::systemdb::SystemDb* sys_ = nullptr;
-    std::vector<kalkyl::systemdb::Conductor> loaded_;   // som registret lästes
+    std::vector<kalkyl::conductor::Conductor> loaded_;   // som registret lästes
     std::vector<std::int64_t> rowIds_;                  // id per rad (appens index), 0 = ny
     std::vector<std::int64_t> removedIds_;              // id på rader som tagits bort
     bool dirty_ = false;                                // något är ändrat sedan inläsningen

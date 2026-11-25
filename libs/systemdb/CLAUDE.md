@@ -5,14 +5,13 @@ Systemdatabasen `system.db`: lokal per användare, alltid synkron på UI-tråden
 Den sparar utseendeläget (`theme_mode`), senaste mapp (`last_folder`), de 10 senaste projekten och linregistret.
 Plats, schema och felhantering står i den arkiverade planen `doc/plans/archive/2026-11-20_Grunder.md` (2.2, 2.10 och 5.4).
 Linregistret står i den arkiverade planen `doc/plans/archive/2026-11-23_Lindata.md`.
+Typen `Conductor` och valideringen ligger i `libs/conductor` (`kalkyl::conductor`), inte här.
 
 | Fil | Innehåll |
 |---|---|
-| `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db` och `kalkyl_platform`) och testet `systemdb` |
-| `system_db.h` | `SystemDb`, `ThemeMode`, `RecentProject`, `kMaxRecent`, `kApplicationId` och `defaultPath()` |
+| `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform` och `kalkyl_conductor`) och testet `systemdb` |
+| `system_db.h` | `SystemDb`, `ThemeMode`, `RecentProject`, `kMaxRecent`, `kApplicationId`, `kAutosaveChoices`, `kDefaultAutosaveMinutes` och `defaultPath()` |
 | `system_db.cpp` | Öppning, migrering, schemakontroll, undanflyttning av skadad fil, inställningar, senaste-listan och linregistret |
-| `conductor.h` | `Conductor`, `ConductorOrigin`, `ConductorField`, `ConductorIssue` och valideringen. Beror bara på standardbiblioteket |
-| `conductor.cpp` | `validateConductor`, `derivedCreepTempC`, `creepTempDeviates`, `sameConductorName` och `sameConductorValues` |
 | `conductor_seed_v1.h` | Startdatan: SWECO:s 129 linor som SQL (`kConductorSeedV1`), en del av schemats steg 1 |
 | `systemdb_test.cpp` | Headless-test i en temporär mapp med åäö i namnet (ctest-namn `systemdb`) |
 
@@ -25,6 +24,9 @@ Linregistret står i den arkiverade planen `doc/plans/archive/2026-11-23_Lindata
   Listan hålls lika med schemat: ett nytt steg med en ny tabell lägger till den.
 - **Fel som returneras:** `TooNew` och åtkomstfel. Anroparen faller då tillbaka på `openInMemory(orsak)`.
 - **Inställningar:** `themeMode()` och `lastFolder()` ger förval vid fel och returnerar inget `Result`.
+- **Automatisk sparning:** nyckeln `autosave_minutes` i tabellen `setting`, utan schemaändring. De tillåtna värdena är
+  `kAutosaveChoices` (0 = av, 1, 5, 10, 15 och 30 minuter). `autosaveMinutes()` ger förvalet 5 när värdet saknas eller är okänt,
+  och `setAutosaveMinutes` ger `Invalid` för ett annat värde.
 - **Senaste projekt:** raden identifieras av `platform::pathKey`, så samma fil med andra versaler ger en rad.
   `touchRecentProject` lägger in och trimmar till `kMaxRecent` i en transaktion.
 - **Ordning:** `last_opened` med millisekunder, och `rowid` avgör vid lika tid.

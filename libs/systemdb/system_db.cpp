@@ -1,6 +1,9 @@
 #include "systemdb/system_db.h"
 
+#include <charconv>
 #include <filesystem>
+#include <string>
+#include <system_error>
 #include <utility>
 
 #include "db/migrate.h"
@@ -10,6 +13,11 @@
 #include "systemdb/conductor_seed_v1.h"
 
 namespace kalkyl::systemdb {
+
+using conductor::Conductor;
+using conductor::ConductorOrigin;
+using conductor::sameConductorValues;
+using conductor::validateConductor;
 
 namespace {
 
@@ -305,6 +313,33 @@ std::string SystemDb::lastFolder()
 Result<void> SystemDb::setLastFolder(const std::string& folder)
 {
     return setSetting("last_folder", folder);
+}
+
+// Minuter mellan automatiska sparningar. Saknat, otolkbart eller ogiltigt värde ger förvalet.
+// Bara värdena i kAutosaveChoices godtas, så ett skräpvärde i filen aldrig stänger av sparningen.
+int SystemDb::autosaveMinutes()
+{
+    const std::string value = setting("autosave_minutes");
+    int minutes = 0;
+    const auto r = std::from_chars(value.data(), value.data() + value.size(), minutes);
+    if (value.empty() || r.ec != std::errc() || r.ptr != value.data() + value.size())
+        return kDefaultAutosaveMinutes;
+    for (int choice : kAutosaveChoices)
+        if (choice == minutes)
+            return minutes;
+    return kDefaultAutosaveMinutes;
+}
+
+// Sparar minuterna för automatisk sparning. Värdet måste vara ett av kAutosaveChoices.
+Result<void> SystemDb::setAutosaveMinutes(int minutes)
+{
+    bool allowed = false;
+    for (int choice : kAutosaveChoices)
+        allowed = allowed || choice == minutes;
+    if (!allowed)
+        return makeError(ErrorCode::Invalid, "Ogiltigt värde för automatisk sparning.",
+                         "autosave_minutes " + std::to_string(minutes));
+    return setSetting("autosave_minutes", std::to_string(minutes));
 }
 
 // De senaste projekten, senast öppnade först. Vid lika tid avgör radordningen.

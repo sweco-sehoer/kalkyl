@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace kalkyl::systemdb {
+namespace kalkyl::conductor {
 
 // Var linan kommer ifrån. Härleds vid läsning och ignoreras vid sparning.
 enum class ConductorOrigin { Seed, SeedModified, Own };
@@ -46,5 +46,11 @@ bool creepTempDeviates(const Conductor& c);
 bool sameConductorName(std::string_view a, std::string_view b);
 // Samma namn (exakt), typ och värden. id och origin ignoreras.
 bool sameConductorValues(const Conductor& a, const Conductor& b);
+// Samma typ och samma tal (D-N). Namn, id och ursprung ignoreras. Används för att se om
+// projektets kopia skiljer sig från linregistret (planen 3.9).
+bool sameConductorData(const Conductor& a, const Conductor& b);
+// Naturlig jämförelse som tabellernas sortering i GlazeUI: en följd siffror jämförs som ett tal
+// ("910" efter "185"), allt annat tecken för tecken med ASCII-versaler vikta. Svarar <0, 0 eller >0.
+int compareNames(std::string_view a, std::string_view b);
 
-} // namespace kalkyl::systemdb
+} // namespace kalkyl::conductor

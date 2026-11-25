@@ -6,7 +6,7 @@
 
 #include "core/result.h"
 #include "db/database.h"
-#include "systemdb/conductor.h"
+#include "conductor/conductor.h"
 
 namespace kalkyl::systemdb {
 
@@ -18,6 +18,10 @@ struct RecentProject { std::string path; std::string name; std::string lastOpene
 
 inline constexpr int           kMaxRecent     = 10;
 inline constexpr std::uint32_t kApplicationId = 0x4B4C4B53;   // "KLKS"
+
+// Automatisk sparning i minuter: 0 = av. Bara dessa värden är tillåtna (planen 3.7).
+inline constexpr int kAutosaveChoices[] = {0, 1, 5, 10, 15, 30};
+inline constexpr int kDefaultAutosaveMinutes = 5;
 
 // Systemdatabasens förvalda plats: system.db i platform::kalkylDataDir().
 std::string defaultPath();
@@ -41,23 +45,28 @@ public:
     core::Result<void> setThemeMode(ThemeMode mode);
     std::string lastFolder();                     // "" om inget är sparat
     core::Result<void> setLastFolder(const std::string& folder);
+    // Automatisk sparning i minuter, ett av kAutosaveChoices. Förvalet 5 vid fel, saknat
+    // eller okänt värde. Nyckeln autosave_minutes i tabellen setting.
+    int autosaveMinutes();
+    // Fel: Invalid (inte ett av kAutosaveChoices), Sql.
+    core::Result<void> setAutosaveMinutes(int minutes);
 
     core::Result<std::vector<RecentProject>> recentProjects();   // senast först, högst kMaxRecent
     core::Result<void> touchRecentProject(const std::string& path, const std::string& name);
     core::Result<void> removeRecentProject(const std::string& path);   // via pathKey
 
     // Linregistret i registrets ordning (sort_order, id).
-    core::Result<std::vector<Conductor>> conductors();
+    core::Result<std::vector<conductor::Conductor>> conductors();
     // En lina. Tomt svar om id saknas.
-    core::Result<std::optional<Conductor>> conductor(std::int64_t id);
+    core::Result<std::optional<conductor::Conductor>> conductor(std::int64_t id);
     // Lägger till (id 0) eller uppdaterar och svarar med id. Namn och typ trimmas.
     // Fel: Invalid, AlreadyExists (namnet finns, NOCASE), NotFound (id saknas), Sql.
-    core::Result<std::int64_t> saveConductor(const Conductor& c);
+    core::Result<std::int64_t> saveConductor(const conductor::Conductor& c);
     // Tar bort en lina. En startdatalina skrivs i conductor_seed_removed. Saknat id är inget fel.
     core::Result<void> removeConductor(std::int64_t id);
     // Fönstrets sparning i EN transaktion: borttagningar, sedan uppdateringar och nya linor.
     // Två linor får byta namn med varandra. Felen som saveConductor; vid fel sparas inget.
-    core::Result<void> saveConductors(const std::vector<Conductor>& upserts,
+    core::Result<void> saveConductors(const std::vector<conductor::Conductor>& upserts,
                                       const std::vector<std::int64_t>& removals);
     // Startdatan tillbaka enligt planen 2.7. Egna linor behålls, id på startdatarader behålls.
     // Fel: AlreadyExists (en egen lina har ett namn ur startdatan), Sql.

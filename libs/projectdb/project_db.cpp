@@ -11,6 +11,7 @@
 
 #include "db/migrate.h"
 #include "platform/system.h"
+#include "projectdb/dev_migration.h"
 #include "platform/text.h"
 #include "version/version.h"
 
@@ -25,7 +26,7 @@ using core::Result;
 // Radbrytning i felmeddelandena.
 const std::string nl = "\x0a";
 
-// Schema version 1: en rad med projektets uppgifter. Se planen 2.10.
+// Schema version 1 (v0.1.0): en rad med projektets uppgifter. Steget ändras aldrig.
 // Tabellen är inte STRICT, så att äldre SQLite-verktyg också kan läsa filen.
 constexpr std::string_view kSchemaV1 = R"sql(
 CREATE TABLE project (
@@ -36,12 +37,18 @@ CREATE TABLE project (
 );
 )sql";
 
-// Schemat för projektfilen. Bara create får initiera en tom fil.
+// Tabellerna som schemat ska ha efter alla steg. Listan hålls lika med stegen.
+constexpr std::string_view kExpectedTablesSql =
+    "('project', 'project_conductor', 'doc_value', 'normal_span', 'normal_span_pole', 'doc_normal_span')";
+constexpr int kExpectedTableCount = 6;
+
+// Schemat för projektfilen: steg 1 och utvecklingsmigreringens steg (dev_migration.h).
+// Bara create får initiera en tom fil.
 db::Schema schema(bool allowInitialize)
 {
     db::Schema s;
     s.applicationId = kApplicationId;
-    s.steps = {kSchemaV1};
+    s.steps = {kSchemaV1, dev::kStep2};
     s.allowInitialize = allowInitialize;
     return s;
 }
@@ -207,6 +214,27 @@ Result<platform::LockFile> acquireLock(const std::string& lockPath, const std::s
     }
 }
 
+// Kontrollerar efter migreringen att alla tabeller i schemat finns. En skadad fil eller en fil
+// med rätt user_version men utan tabellerna vägras här i stället för vid första läsningen.
+Result<void> checkTables(db::Database& local, const std::string& path)
+{
+    const std::string sql =
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN " +
+        std::string(kExpectedTablesSql);
+    auto stmt = local.prepare(sql);
+    if (!stmt)
+        return stmt.error();
+    auto row = stmt.value().step();
+    if (!row)
+        return row.error();
+    if (!row.value() || stmt.value().integer(0) != kExpectedTableCount)
+        return makeError(ErrorCode::NotADatabase,
+                         "Projektfilen saknar delar som den här versionen av Kalkyl behöver. "
+                         "Filen är skadad:" + nl + path,
+                         "saknar tabeller i schemat");
+    return {};
+}
+
 // Läser projektraden ur arbetskopian. Saknas tabellen eller raden är filen inte ett komplett
 // Kalkylprojekt.
 Result<ProjectInfo> readInfo(db::Database& local, const std::string& path)
@@ -270,6 +298,8 @@ ProjectDb::ProjectDb(ProjectDb&& other) noexcept
       lockedBy_(std::move(other.lockedBy_)),
       lock_(std::move(other.lock_)),
       base_(other.base_),
+      revision_(other.revision_),
+      savedRevision_(other.savedRevision_),
       local_(std::move(other.local_))
 {
     other.localPath_.clear();
@@ -291,6 +321,8 @@ ProjectDb& ProjectDb::operator=(ProjectDb&& other) noexcept
     lockedBy_ = std::move(other.lockedBy_);
     lock_ = std::move(other.lock_);
     base_ = other.base_;
+    revision_ = other.revision_;
+    savedRevision_ = other.savedRevision_;
     local_ = std::move(other.local_);
     other.localPath_.clear();
     other.lock_.reset();
@@ -370,6 +402,8 @@ Result<ProjectDb> ProjectDb::open(const std::string& path, const OpenOptions& op
         return fail(cancelledError());
     if (auto migrated = db::migrate(p.local_, schema(false)); !migrated)
         return fail(relabel(migrated.error(), file));
+    if (auto tables = checkTables(p.local_, file); !tables)
+        return fail(tables.error());
     if (auto checked = p.local_.quickCheck(); !checked)
         return fail(relabel(checked.error(), file));
 
@@ -457,7 +491,7 @@ Result<ProjectDb> ProjectDb::create(const std::string& path, const std::string& 
         (void)platform::removeFile(snap.value().localFile);
         return fail(published.error());
     }
-    p.published(published.value());
+    p.published(snap.value(), published.value());
     return p;
 }
 
@@ -509,6 +543,7 @@ Result<Snapshot> ProjectDb::snapshot()
     s.target = path_;
     s.base = base_;
     s.replace = true;
+    s.revision = revision_;
     if (auto removed = platform::removeFile(s.localFile); !removed)
         return removed.error();
     if (auto copied = local_.vacuumInto(s.localFile); !copied)
@@ -569,10 +604,30 @@ Result<platform::FileStamp> ProjectDb::publish(const Snapshot& s, std::stop_toke
     return tmpStamp;
 }
 
-// Efter en lyckad publicering är det nya originalets stämpel basen för nästa konfliktkontroll.
-void ProjectDb::published(const platform::FileStamp& newBase)
+// Efter en lyckad publicering är det nya originalets stämpel basen för nästa konfliktkontroll,
+// och bildens revision är den senast sparade. Skrivningar efter bilden lämnar projektet ändrat.
+void ProjectDb::published(const Snapshot& s, const platform::FileStamp& newBase)
 {
     base_ = newBase;
+    savedRevision_ = s.revision;
+}
+
+// Ändringsräknaren: räknas upp av varje lyckad skrivning i arbetskopian.
+std::uint64_t ProjectDb::revision() const
+{
+    return revision_;
+}
+
+// Sann när arbetskopian har ändringar som inte finns i den senast publicerade bilden.
+bool ProjectDb::isModified() const
+{
+    return revision_ != savedRevision_;
+}
+
+// Räknar upp revisionen. Anropas av dataskrivningarna efter en lyckad transaktion.
+void ProjectDb::markModified()
+{
+    ++revision_;
 }
 
 // Stänger arbetskopian, tar bort den och släpper låset. Background släpper låset i en

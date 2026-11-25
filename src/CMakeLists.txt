@@ -3,6 +3,7 @@ set(KALKYL_WINDOWS "")
 glaze_add_window(KALKYL_WINDOWS
     windows/conductor_dialog
     windows/main_window
+    windows/normal_span_dialog
     windows/project_picker)
 
 # Programmet. WIN32 ger en GUI-exe utan konsol.
@@ -17,6 +18,8 @@ target_link_libraries(kalkyl PRIVATE
     kalkyl_version
     kalkyl_core
     kalkyl_platform
+    kalkyl_conductor
+    kalkyl_calc
     kalkyl_systemdb
     kalkyl_projectdb
     kalkyl_appearance

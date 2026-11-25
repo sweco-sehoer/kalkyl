@@ -9,14 +9,17 @@ Fönstren ligger i `src/windows/`, stödbiblioteken i `libs/`.
 | Del | Katalog | Innehåll |
 |---|---|---|
 | Projektväljare | `src/windows/project_picker.*` | Startfönstret: de 10 senaste projekten, Öppna, Öppna annat projekt…, Nytt projekt… och Ta bort ur listan |
-| Huvudfönster | `src/windows/main_window.*` | Programikon (stor med verktygsfält), menyer och lägesknapp i namnlisten, flikarna Dokumentation (uppgifter enligt ByggPM i blått, grönt och gult, beräkningar före i lila och efter i rosa; fas- och topplina ur linregistret) och Stolptabell före och statusrad |
+| Huvudfönster | `src/windows/main_window.*` | Programikon (stor med verktygsfält), menyer och lägesknapp i namnlisten, flikarna Dokumentation (uppgifter enligt ByggPM i blått, grönt och gult, beräkningar före i lila och efter i rosa; fas- och topplina kopieras ur linregistret till projektet; högerklick på normalspannsraderna), Stolptabell före och Normalspann (alla beräkningar, även lösa), Arkiv > Spara (Ctrl+S), automatisk sparning och statusrad |
 | Lindata | `src/windows/conductor_dialog.*` | Inställningar > Lindata…: redigera linregistret (lägg till, ta bort, återställ startdata) |
+| Normalspann | `src/windows/normal_span_dialog.*` | Formuläret Normalspannsberäkning enligt Normalspannberäkning.xlsm: tabell med Stpnr, spannlängd och H som i Excel (urklipp, markering), resultat och kontrollerna 1–5 |
+| Beräkningar | `libs/calc` | Rena beräkningsfunktioner (normalspannet) och tabelltext (decimalkomma, tabbseparerat urklipp) |
+| Linor | `libs/conductor` | Typen `Conductor`, validering och jämförelser, gemensam för systemdb och projectdb |
 | Version | `libs/version` | Programmets version som header och versionsresurs för kalkyl.exe |
 | Felmodell | `libs/core` | `Result<T>` och `Error`, som alla bibliotek använder |
 | Plattform | `libs/platform` | Text (UTF-8/UTF-16), system, filer, låsfil och filassociation (Win32) |
 | Databas | `libs/db` | SQLite-anslutning, satser och migrering |
-| Systemdatabas | `libs/systemdb` | Utseendeläge, senaste mapp, senaste projekt och linregistret, lokalt per användare |
-| Projektdatabas | `libs/projectdb` | Projektfilen `.kalkyl`: lokal arbetskopia, lås och säker publicering |
+| Systemdatabas | `libs/systemdb` | Utseendeläge, senaste mapp, senaste projekt, linregistret och automatisk sparning, lokalt per användare |
+| Projektdatabas | `libs/projectdb` | Projektfilen `.kalkyl`: lokal arbetskopia, lås och säker publicering; Dokumentation, linkopior och normalspannsberäkningar (`project_data.*`) |
 | Utseende | `libs/appearance` | Slate, temat Windows och lägesknappen, gemensamt för alla toppfönster |
 | Resurser | `res` | Programikonen (källa, `assets.bin`, `kalkyl.ico`) |
 | Installation | `installer` | setup.exe per användare (NSIS) |
@@ -78,22 +81,26 @@ Strukturen är fast. Nya filer läggs där de hör hemma.
 
 ## Data
 
-- **Systemdatabasen** `system.db` ligger lokalt i `%LOCALAPPDATA%\Kalkyl` (eller `KALKYL_DATA_DIR`) och sparar utseendeläge, senaste mapp, senaste projekt och linregistret. Linregistrets startdata (SWECO:s 129 linor ur Linberäkning.xlsm) ligger i `libs/systemdb/conductor_seed_v1.h`.
+- **Systemdatabasen** `system.db` ligger lokalt i `%LOCALAPPDATA%\Kalkyl` (eller `KALKYL_DATA_DIR`) och sparar utseendeläge, senaste mapp, senaste projekt, linregistret och intervallet för automatisk sparning. Linregistrets startdata (SWECO:s 129 linor ur Linberäkning.xlsm) ligger i `libs/systemdb/conductor_seed_v1.h`.
 - **Projekt** är en SQLite-fil med ändelsen `.kalkyl`, som kan ligga på en nätverksshare.
-  Programmet kopierar den till en lokal arbetskopia vid öppning och skriver tillbaka den bara med atomär publicering. En låsfil visar att projektet är öppet.
+  Programmet kopierar den till en lokal arbetskopia vid öppning och skriver tillbaka den bara med atomär publicering (Ctrl+S eller automatisk sparning). En låsfil visar att projektet är öppet.
+  Projektet sparar Dokumentationens värden, en kopia av varje använd lina och normalspannsberäkningarna.
 - Avinstallationen rör aldrig systemdatabasen, arbetskopiorna eller projektfilerna.
 - `.kalkyl` associeras per användare med Kalkyl (`kalkyl.exe --registrera` och `--avregistrera`).
 - Detaljer, felmodell och API:er står i `doc/plans/archive/2026-11-20_Grunder.md`.
 
 ### Migrering mellan versioner
 
-Varje taggad version (t.ex. `v0.1.0`) till nästa taggade version ska alltid migrera både systemdatabasen och projektdatabasen korrekt. Inga data får gå förlorade. Migrering gäller bara mellan taggade versioner.
+Databaser från den senaste commiten ska alltid gå att öppna med den nya koden, både systemdatabasen och projektdatabasen. Inga data får gå förlorade.
+Det gäller hela vägen från `v0.1.0` (taggad på commit 8f4f3d5) och framåt.
 
-- **Före första taggade versionen** finns ingen migrering: schemat ändras direkt i steg 1. Lokala utvecklingsdatabaser (`system.db`, testprojekt) tas bort och skapas om.
-- Schemat versioneras med `PRAGMA user_version`. Efter en taggad version är varje ändring ett nytt steg sist i stegen (`db::Schema::steps`), och de stegen körs av `db::migrate`.
-- Ändringar mellan två taggar samlas i ETT steg per databas, som kan ändras fritt tills nästa tagg sätts.
-- Ett steg som har funnits i en taggad version ändras aldrig. Fel rättas med ett nytt steg.
-- Varje schemaändring har ett test som skapar databasen som den såg ut i den förra taggade versionen, öppnar den med den nya koden och kontrollerar att alla data finns kvar och att de nya delarna är på plats.
+- **Räknaren** är `PRAGMA user_version` i filen: varje steg i `db::Schema::steps` höjer den med ett, och `db::migrate` kör de steg som saknas i en transaktion.
+  En fil med högre nummer än programmet känner till vägras (`TooNew`).
+- **Steg 1** är schemat i v0.1.0 och ändras aldrig.
+- **Utvecklingsmigreringen** ligger i en egen fil per databas, `libs/<databas>/dev_migration.h` (namnrymden `…::dev`), med stegen efter v0.1.0.
+  Ändringar sedan den senaste commiten samlas i ETT nytt steg sist, som kan ändras fritt tills det committas. Ett committat steg ändras aldrig; fel rättas med ett nytt steg.
+- **Vid 1.0.0** slås alla steg ihop till ett nytt steg 1, `dev_migration.h` töms och räknaren börjar om. Därefter gäller samma regel mellan släppta versioner.
+- Varje schemaändring har ett test som skapar databasen som den såg ut i den förra commiten, öppnar den med den nya koden och kontrollerar att alla data finns kvar och att de nya delarna är på plats.
 - Startdata som följer med ett steg, t.ex. lindata, läggs in av steget. Användarens egna ändringar skrivs aldrig över av en senare migrering.
 
 ## Fönster

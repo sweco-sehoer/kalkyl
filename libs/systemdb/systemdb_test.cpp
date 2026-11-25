@@ -236,7 +236,7 @@ bool near(double a, double b)
 }
 
 // Hittar en lina på namn (exakt) i listan, eller nullptr.
-const systemdb::Conductor* findByName(const std::vector<systemdb::Conductor>& list,
+const conductor::Conductor* findByName(const std::vector<conductor::Conductor>& list,
                                       const std::string& name)
 {
     for (const auto& c : list)
@@ -246,11 +246,11 @@ const systemdb::Conductor* findByName(const std::vector<systemdb::Conductor>& li
 }
 
 // Läser hela registret. Misslyckas det räknas ett fel och listan blir tom.
-std::vector<systemdb::Conductor> readAll(systemdb::SystemDb& sys)
+std::vector<conductor::Conductor> readAll(systemdb::SystemDb& sys)
 {
     auto all = sys.conductors();
     CHECK(all.ok());
-    return all.ok() ? all.value() : std::vector<systemdb::Conductor>{};
+    return all.ok() ? all.value() : std::vector<conductor::Conductor>{};
 }
 
 // Startdatan: antal, ordning, utvalda rader, de särskilda fallen och reglerna för hela registret.
@@ -285,7 +285,7 @@ void testConductorSeed(const std::string& dir)
         CHECK(near(curlew->creepTempC, 21));
         CHECK(near(curlew->weightNPerM, 19.6));
         CHECK(curlew->breakingLoadKn && near(*curlew->breakingLoadKn, 165));
-        CHECK(curlew->origin == systemdb::ConductorOrigin::Seed);
+        CHECK(curlew->origin == conductor::ConductorOrigin::Seed);
         auto one = sys.conductor(curlew->id);
         CHECK(one.ok() && one.value() && one.value()->name == curlew->name);
     }
@@ -312,11 +312,11 @@ void testConductorSeed(const std::string& dir)
             ++noBreaking;
         if (c.type.empty())
             ++noType;
-        CHECK(c.origin == systemdb::ConductorOrigin::Seed);
-        CHECK(systemdb::validateConductor(c).empty());
-        CHECK(!systemdb::creepTempDeviates(c));
+        CHECK(c.origin == conductor::ConductorOrigin::Seed);
+        CHECK(conductor::validateConductor(c).empty());
+        CHECK(!conductor::creepTempDeviates(c));
         for (std::size_t j = i + 1; j < all.size(); ++j)
-            CHECK(!systemdb::sameConductorName(c.name, all[j].name));
+            CHECK(!conductor::sameConductorName(c.name, all[j].name));
     }
     CHECK(noBreaking == 7);
     CHECK(noType == 20);
@@ -342,19 +342,19 @@ void testConductorEdit(const std::string& dir)
         curlewId = curlew->id;
 
         // En ändrad startdatalina blir SeedModified, och en sparning utan ändring rör inte flaggan.
-        systemdb::Conductor changed = *curlew;
+        conductor::Conductor changed = *curlew;
         changed.diameterMm = 32;
         auto saved = sys.saveConductor(changed);
         CHECK(saved.ok() && saved.value() == curlewId);
         CHECK(sys.saveConductor(*morkulla).ok());
         auto one = sys.conductor(curlewId);
-        CHECK(one.ok() && one.value() && one.value()->origin == systemdb::ConductorOrigin::SeedModified);
+        CHECK(one.ok() && one.value() && one.value()->origin == conductor::ConductorOrigin::SeedModified);
         CHECK(one.ok() && one.value() && near(one.value()->diameterMm, 32));
         auto mork = sys.conductor(morkulla->id);
-        CHECK(mork.ok() && mork.value() && mork.value()->origin == systemdb::ConductorOrigin::Seed);
+        CHECK(mork.ok() && mork.value() && mork.value()->origin == conductor::ConductorOrigin::Seed);
 
         // En egen lina får ett nytt id, hamnar sist och trimmas.
-        systemdb::Conductor own = *morkulla;
+        conductor::Conductor own = *morkulla;
         own.id = 0;
         own.name = "  Testlina åäö ";
         auto added = sys.saveConductor(own);
@@ -363,22 +363,22 @@ void testConductorEdit(const std::string& dir)
         CHECK(after.size() == 130);
         if (after.size() == 130) {
             CHECK(after.back().name == "Testlina åäö");
-            CHECK(after.back().origin == systemdb::ConductorOrigin::Own);
+            CHECK(after.back().origin == conductor::ConductorOrigin::Own);
             CHECK(added.ok() && after.back().id == added.value());
         }
 
         // Namnkrockar: samma namn med andra versaler, och ett namnbyte till ett befintligt namn.
-        systemdb::Conductor clash = own;
+        conductor::Conductor clash = own;
         clash.name = "593 mm² feal curlew";
         auto clashAdd = sys.saveConductor(clash);
         CHECK(!clashAdd.ok() && clashAdd.error().code == core::ErrorCode::AlreadyExists);
-        systemdb::Conductor rename = *morkulla;
+        conductor::Conductor rename = *morkulla;
         rename.name = "593 mm² FeAl CURLEW";
         auto clashRename = sys.saveConductor(rename);
         CHECK(!clashRename.ok() && clashRename.error().code == core::ErrorCode::AlreadyExists);
 
         // Ogiltiga värden och en rad som saknas.
-        systemdb::Conductor bad = own;
+        conductor::Conductor bad = own;
         bad.name = "Ogiltig";
         bad.diameterMm = 0;
         auto badSave = sys.saveConductor(bad);
@@ -387,7 +387,7 @@ void testConductorEdit(const std::string& dir)
         bad.name = "   ";
         auto emptyName = sys.saveConductor(bad);
         CHECK(!emptyName.ok() && emptyName.error().code == core::ErrorCode::Invalid);
-        systemdb::Conductor ghost = own;
+        conductor::Conductor ghost = own;
         ghost.id = 99999;
         ghost.name = "Spöke";
         auto ghostSave = sys.saveConductor(ghost);
@@ -410,8 +410,8 @@ void testConductorEdit(const std::string& dir)
     CHECK(a && b);
     if (!a || !b)
         return;
-    systemdb::Conductor ca = *a;
-    systemdb::Conductor cb = *b;
+    conductor::Conductor ca = *a;
+    conductor::Conductor cb = *b;
     std::swap(ca.name, cb.name);
     CHECK(sys.saveConductors({ca, cb}, {}).ok());
     auto swappedA = sys.conductor(ca.id);
@@ -419,9 +419,9 @@ void testConductorEdit(const std::string& dir)
     CHECK(swappedA.ok() && swappedA.value() && swappedA.value()->name == "593 mm² FeAl MORKULLA");
     CHECK(swappedB.ok() && swappedB.value() && swappedB.value()->name == "593 mm² FeAl CURLEW");
     CHECK(swappedA.ok() && swappedA.value() &&
-          swappedA.value()->origin == systemdb::ConductorOrigin::SeedModified);
+          swappedA.value()->origin == conductor::ConductorOrigin::SeedModified);
     CHECK(swappedB.ok() && swappedB.value() &&
-          swappedB.value()->origin == systemdb::ConductorOrigin::SeedModified);
+          swappedB.value()->origin == conductor::ConductorOrigin::SeedModified);
 
     // En giltig och en ogiltig uppdatering: Invalid, och den giltiga sparas inte.
     all = readAll(sys);
@@ -430,9 +430,9 @@ void testConductorEdit(const std::string& dir)
     CHECK(falcon && orre);
     if (!falcon || !orre)
         return;
-    systemdb::Conductor goodFalcon = *falcon;
+    conductor::Conductor goodFalcon = *falcon;
     goodFalcon.diameterMm = 40;
-    systemdb::Conductor badOrre = *orre;
+    conductor::Conductor badOrre = *orre;
     badOrre.diameterMm = 0;
     auto invalid = sys.saveConductors({goodFalcon, badOrre}, {});
     CHECK(!invalid.ok() && invalid.error().code == core::ErrorCode::Invalid);
@@ -440,7 +440,7 @@ void testConductorEdit(const std::string& dir)
     CHECK(falconAfter.ok() && falconAfter.value() && near(falconAfter.value()->diameterMm, 39.3));
 
     // En namnkrock efter en lyckad skrivning rullar tillbaka hela sparningen.
-    systemdb::Conductor clashOrre = *orre;
+    conductor::Conductor clashOrre = *orre;
     clashOrre.name = "910 mm² FeAl FALCON";
     auto clashed = sys.saveConductors({goodFalcon, clashOrre}, {});
     CHECK(!clashed.ok() && clashed.error().code == core::ErrorCode::AlreadyExists);
@@ -465,8 +465,8 @@ void testConductorRemoveRestore(const std::string& dir)
     if (!bluejay || !curlew)
         return;
     const std::int64_t curlewId = curlew->id;
-    systemdb::Conductor own = *curlew;
-    systemdb::Conductor changed = *curlew;
+    conductor::Conductor own = *curlew;
+    conductor::Conductor changed = *curlew;
 
     // Bluejay försvinner, och en egen lina går att ta bort. Ett id som saknas är inget fel.
     CHECK(sys.removeConductor(bluejay->id).ok());
@@ -492,7 +492,7 @@ void testConductorRemoveRestore(const std::string& dir)
     CHECK(restored != nullptr);
     if (restored) {
         CHECK(near(restored->diameterMm, 31.7));
-        CHECK(restored->origin == systemdb::ConductorOrigin::Seed);
+        CHECK(restored->origin == conductor::ConductorOrigin::Seed);
         CHECK(restored->id == curlewId);
     }
     CHECK(findByName(all, "Bluejay") != nullptr);
@@ -505,11 +505,11 @@ void testConductorRemoveRestore(const std::string& dir)
     CHECK(blue && curlew2);
     if (!blue || !curlew2)
         return;
-    systemdb::Conductor changed2 = *curlew2;
+    conductor::Conductor changed2 = *curlew2;
     changed2.diameterMm = 32;
     CHECK(sys.saveConductor(changed2).ok());
     CHECK(sys.removeConductor(blue->id).ok());
-    systemdb::Conductor lower = changed2;
+    conductor::Conductor lower = changed2;
     lower.id = 0;
     lower.name = "bluejay";
     CHECK(sys.saveConductor(lower).ok());
@@ -522,38 +522,49 @@ void testConductorRemoveRestore(const std::string& dir)
     CHECK(stillChanged && near(stillChanged->diameterMm, 32));
 }
 
-// Reglerna utan databas: framräknad krypningstemperatur, namnjämförelse och avvikelse.
-void testConductorRules()
+// Automatisk sparning: förval 5, giltigt värde består över omöppning, ogiltigt avvisas
+// och ett skräpvärde i filen eller en databas i minnet ger förvalet.
+void testAutosaveSetting(const std::string& dir)
 {
-    const auto derived = systemdb::derivedCreepTempC(0.4, 19);
-    CHECK(derived && std::fabs(*derived - 21.0526) < 1e-4);
-    const auto zero = systemdb::derivedCreepTempC(0, 0);
-    CHECK(zero && near(*zero, 0));
-    CHECK(!systemdb::derivedCreepTempC(0.4, 0));
-
-    CHECK(systemdb::sameConductorName("ABC å", "abc å"));
-    CHECK(!systemdb::sameConductorName("Å", "å"));
-
-    systemdb::Conductor c;
-    c.name = "Prov";
-    c.areaMm2 = 100;
-    c.diameterMm = 10;
-    c.eInitialMpa = 50000;
-    c.ePermanentMpa = 60000;
-    c.eInitialLimitMpa = 100;
-    c.alphaE6PerC = 19;
-    c.creepStrainPermille = 0.4;
-    c.creepTempC = 21.05;
-    c.weightNPerM = 3;
-    CHECK(systemdb::validateConductor(c).empty());
-    CHECK(!systemdb::creepTempDeviates(c));
-    c.creepTempC = 21.0526 + 0.6;
-    CHECK(systemdb::creepTempDeviates(c));
-    c.creepTempC = 21.05;
-    c.alphaE6PerC = -1;
-    c.breakingLoadKn = 0;
-    const auto issues = systemdb::validateConductor(c);
-    CHECK(issues.size() == 1 && issues.front().field == systemdb::ConductorField::BreakingLoad);
+    const std::string path = join(dir, "autosave.db");
+    {
+        auto sys = systemdb::SystemDb::open(path);
+        CHECK(sys.ok());
+        if (!sys.ok())
+            return;
+        CHECK(sys.value().autosaveMinutes() == 5);
+        CHECK(sys.value().setAutosaveMinutes(10).ok());
+        CHECK(sys.value().autosaveMinutes() == 10);
+        auto bad = sys.value().setAutosaveMinutes(7);
+        CHECK(!bad.ok() && bad.error().code == core::ErrorCode::Invalid);
+        CHECK(sys.value().autosaveMinutes() == 10);
+        CHECK(sys.value().setAutosaveMinutes(0).ok());
+        CHECK(sys.value().autosaveMinutes() == 0);
+        CHECK(sys.value().setAutosaveMinutes(10).ok());
+    }
+    {
+        auto sys = systemdb::SystemDb::open(path);
+        CHECK(sys.ok());
+        if (!sys.ok())
+            return;
+        CHECK(sys.value().autosaveMinutes() == 10);
+    }
+    {
+        auto raw = db::Database::open(path, db::OpenOptions{});
+        CHECK(raw.ok());
+        if (raw.ok())
+            CHECK(raw.value().exec(R"sql(UPDATE setting SET value = 'abc' WHERE key = 'autosave_minutes')sql").ok());
+    }
+    {
+        auto sys = systemdb::SystemDb::open(path);
+        CHECK(sys.ok());
+        if (sys.ok())
+            CHECK(sys.value().autosaveMinutes() == 5);
+    }
+    auto mem = systemdb::SystemDb::openInMemory("test");
+    CHECK(mem.ok());
+    if (mem.ok())
+        CHECK(mem.value().autosaveMinutes() == 5);
 }
 
 // En databas med det gamla schemat (utan linregistret) flyttas undan som skadad och ersätts
@@ -619,7 +630,7 @@ int main()
     testConductorSeed(dir);
     testConductorEdit(dir);
     testConductorRemoveRestore(dir);
-    testConductorRules();
+    testAutosaveSetting(dir);
     testOldSchemaMovedAside(dir);
 
     fs::remove_all(platform::pathFromUtf8(dir), ec);

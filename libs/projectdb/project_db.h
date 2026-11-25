@@ -15,7 +15,7 @@ namespace kalkyl::projectdb {
 
 inline constexpr std::string_view kExtension     = ".kalkyl";
 inline constexpr std::uint32_t    kApplicationId = 0x4B4C4B50;   // "KLKP"
-inline constexpr int              kSchemaVersion = 1;
+inline constexpr int              kSchemaVersion = 2;   // antal steg: 1 (v0.1.0) + dev_migration.h
 
 // Projektets uppgifter ur tabellen project.
 struct ProjectInfo { std::string name; std::string createdUtc; std::string createdWith; };
@@ -43,6 +43,7 @@ struct Snapshot {
     std::string target;          // projektfilen (originalet)
     platform::FileStamp base;    // originalets stämpel när det öppnades eller publicerades senast
     bool replace = true;         // false vid create: målet får inte finnas
+    std::uint64_t revision = 0;  // arbetskopians revision när bilden togs
 };
 
 // Ett öppet projekt: originalet (på share eller lokalt), den lokala arbetskopian och låset.
@@ -70,10 +71,18 @@ public:
     const std::optional<platform::LockInfo>& lockedBy() const;
     db::Database& local();                          // arbetskopian, för all läsning och skrivning
 
-    // Sparning i tre steg. Anropas inte av UI:t i detta steg men testas headless.
+    // Ändringsräknaren. Varje skrivning i arbetskopian (project_data.h) räknar upp revision();
+    // isModified() är sann när revisionen skiljer sig från den senast publicerade bilden.
+    std::uint64_t revision() const;
+    bool isModified() const;
+    // Anropas av dataskrivningarna efter en lyckad transaktion.
+    void markModified();
+
+    // Sparning i tre steg: bilden tas på UI-tråden, publiceras i en arbetstråd och bekräftas på UI-tråden.
     core::Result<Snapshot> snapshot();              // UI-tråden: VACUUM INTO lokalt; AccessDenied om ReadOnly
     static core::Result<platform::FileStamp> publish(const Snapshot& s, std::stop_token stop);  // arbetstråd
-    void published(const platform::FileStamp& newBase);   // UI-tråden: ny bas
+    // UI-tråden: ny bas och sparad revision.
+    void published(const Snapshot& s, const platform::FileStamp& newBase);
 
     enum class CloseMode { Wait, Background };
     // Stänger anslutningen, tar bort arbetskopian och släpper låset (Background: frikopplat).
@@ -86,6 +95,8 @@ private:
     std::optional<platform::LockInfo> lockedBy_;
     std::optional<platform::LockFile> lock_;
     platform::FileStamp base_;
+    std::uint64_t revision_ = 0;
+    std::uint64_t savedRevision_ = 0;
     db::Database local_;          // tomt efter en flytt eller close
 };
 

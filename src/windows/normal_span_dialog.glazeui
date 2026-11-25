@@ -1,0 +1,350 @@
+// GENERERAD av GlazeBuilder — redigera i GlazeBuilder, inte här.
+// glazeui-design: ui=Slate theme=slate(Windows) style=0 lang=sv
+#include "normal_span_dialog.h"
+
+NormalSpanDialog::NormalSpanDialog() { initializeComponent(); }
+
+void NormalSpanDialog::initializeComponent()
+{
+    setTitle("Normalspannsberäkning");
+    setContentSize(1200, 720);
+    setMinimumContentSize(920, 520);
+    setStartPosition(glaze::StartPosition::CenterOwner);
+    setModal(true);
+    setAcceptButton(okBtn);
+    setCancelButton(cancelBtn);
+
+    statusBar.show();
+    statusBar.addPanel("", 0, true);
+
+    noteLbl.name = "noteLbl";
+    noteLbl.setText("Anteckning");
+    noteLbl.x = 16;
+    noteLbl.y = 16;
+
+    noteTxt.name = "noteTxt";
+    noteTxt.anchors = {true, true, true, false};
+    noteTxt.anchorLeft = {"noteLbl", 8};
+    noteTxt.y = 12;
+    noteTxt.right = 16;
+
+    docLbl.name = "docLbl";
+    docLbl.setRole(glaze::Label::Role::Dim);
+    docLbl.x = 16;
+    docLbl.anchorTop = {"noteTxt", 8};
+    docLbl.anchors = {true, true, true, false};
+    docLbl.right = 16;
+
+    infoLbl.name = "infoLbl";
+    infoLbl.setText("Klistra in Stpnr, spannlängd och H från Excel med Ctrl+V i den cell där inklistringen ska börja. Spannlängd är det horisontella spannet före stolpen. Spannet före första stolpen ingår inte i summorna. H är plushöjd för mark eller infästning och är valfri.");
+    infoLbl.setRole(glaze::Label::Role::Dim);
+    infoLbl.setWrap(true);
+    infoLbl.x = 16;
+    infoLbl.anchorTop = {"docLbl", 4};
+    infoLbl.anchors = {true, true, true, false};
+    infoLbl.right = 16;
+
+    cancelBtn.name = "cancelBtn";
+    cancelBtn.setText("Avbryt");
+    cancelBtn.setDialogResult(glaze::DialogResult::Cancel);
+    cancelBtn.width = 96;
+    cancelBtn.anchors = {false, false, true, true};
+    cancelBtn.right = 16;
+    cancelBtn.bottom = 16;
+
+    okBtn.name = "okBtn";
+    okBtn.setText("OK");
+    okBtn.setToolTip("Sparar beräkningen i projektet och stänger");
+    okBtn.width = 96;
+    okBtn.anchors = {false, false, true, true};
+    okBtn.anchorRight = {"cancelBtn", 8};
+    okBtn.bottom = 16;
+
+    clearBtn.name = "clearBtn";
+    clearBtn.setText("Töm…");
+    clearBtn.setImg(glaze::stockIcon(glaze::StockIcon::Clear));
+    clearBtn.setToolTip("Tömmer hela tabellen");
+    clearBtn.x = 16;
+    clearBtn.anchors = {true, false, false, true};
+    clearBtn.bottom = 16;
+
+    resultPanel.name = "resultPanel";
+    resultPanel.width = 380;
+    resultPanel.anchors = {false, true, true, true};
+    resultPanel.anchorTop = {"infoLbl", 8};
+    resultPanel.right = 16;
+    resultPanel.anchorBottom = {"cancelBtn", 16};
+
+    resultGrp.name = "resultGrp";
+    resultGrp.setText("Resultat");
+    resultGrp.x = 0;
+    resultGrp.y = 0;
+    resultGrp.anchors = {true, true, true, false};
+    resultGrp.right = 12;
+
+    anLbl.name = "anLbl";
+    anLbl.setText("Normalspann, aₙ");
+    anLbl.setWidthGroup("result");
+    anLbl.x = 0;
+    anLbl.y = 0;
+
+    anValue.name = "anValue";
+    anValue.setText("–");
+    anValue.setRole(glaze::Label::Role::Heading);
+    anValue.anchorLeft = {"anLbl", 12};
+    anValue.y = 0;
+
+    anDhLbl.name = "anDhLbl";
+    anDhLbl.setText("Normalspann, aₙ,ΔH");
+    anDhLbl.setWidthGroup("result");
+    anDhLbl.x = 0;
+    anDhLbl.anchorTop = {"anValue", 4};
+
+    anDhValue.name = "anDhValue";
+    anDhValue.setText("–");
+    anDhValue.anchorLeft = {"anDhLbl", 12};
+    anDhValue.anchorTop = {"anValue", 4};
+
+    meanLbl.name = "meanLbl";
+    meanLbl.setText("Medelspann");
+    meanLbl.setWidthGroup("result");
+    meanLbl.x = 0;
+    meanLbl.anchorTop = {"anDhValue", 4};
+
+    meanValue.name = "meanValue";
+    meanValue.setText("–");
+    meanValue.anchorLeft = {"meanLbl", 12};
+    meanValue.anchorTop = {"anDhValue", 4};
+
+    totalLbl.name = "totalLbl";
+    totalLbl.setText("Totallängd");
+    totalLbl.setWidthGroup("result");
+    totalLbl.x = 0;
+    totalLbl.anchorTop = {"meanValue", 4};
+
+    totalValue.name = "totalValue";
+    totalValue.setText("–");
+    totalValue.anchorLeft = {"totalLbl", 12};
+    totalValue.anchorTop = {"meanValue", 4};
+
+    countLbl.name = "countLbl";
+    countLbl.setText("Antal spann");
+    countLbl.setWidthGroup("result");
+    countLbl.x = 0;
+    countLbl.anchorTop = {"totalValue", 4};
+
+    countValue.name = "countValue";
+    countValue.setText("–");
+    countValue.anchorLeft = {"countLbl", 12};
+    countValue.anchorTop = {"totalValue", 4};
+
+    sectionLbl.name = "sectionLbl";
+    sectionLbl.setText("Sträcka");
+    sectionLbl.setWidthGroup("result");
+    sectionLbl.x = 0;
+    sectionLbl.anchorTop = {"countValue", 4};
+
+    sectionValue.name = "sectionValue";
+    sectionValue.setText("–");
+    sectionValue.anchorLeft = {"sectionLbl", 12};
+    sectionValue.anchorTop = {"countValue", 4};
+
+    limitGrp.name = "limitGrp";
+    limitGrp.setText("Kontroller");
+    limitGrp.x = 0;
+    limitGrp.anchorTop = {"resultGrp", 12};
+    limitGrp.anchors = {true, true, true, false};
+    limitGrp.right = 12;
+
+    lim1Lbl.name = "lim1Lbl";
+    lim1Lbl.setText("1  Längsta tillåtna spannlängd, × aₙ");
+    lim1Lbl.x = 0;
+    lim1Lbl.y = 0;
+
+    lim1Spin.name = "lim1Spin";
+    lim1Spin.width = 90;
+    lim1Spin.setDecimals(2);
+    lim1Spin.setMin(0.01);
+    lim1Spin.setMax(100);
+    lim1Spin.setStep(0.05);
+    lim1Spin.setValue(1.5);
+    lim1Spin.x = 0;
+    lim1Spin.anchorTop = {"lim1Lbl", 4};
+
+    lim1Count.name = "lim1Count";
+    lim1Count.setText("–");
+    lim1Count.anchorLeft = {"lim1Spin", 12};
+    lim1Count.anchorTop = {"lim1Lbl", 8};
+
+    lim2Lbl.name = "lim2Lbl";
+    lim2Lbl.setText("2  Kortaste tillåtna spannlängd, × aₙ");
+    lim2Lbl.x = 0;
+    lim2Lbl.anchorTop = {"lim1Spin", 12};
+
+    lim2Spin.name = "lim2Spin";
+    lim2Spin.width = 90;
+    lim2Spin.setDecimals(2);
+    lim2Spin.setMin(0.01);
+    lim2Spin.setMax(100);
+    lim2Spin.setStep(0.05);
+    lim2Spin.setValue(0.5);
+    lim2Spin.x = 0;
+    lim2Spin.anchorTop = {"lim2Lbl", 4};
+
+    lim2Count.name = "lim2Count";
+    lim2Count.setText("–");
+    lim2Count.anchorLeft = {"lim2Spin", 12};
+    lim2Count.anchorTop = {"lim2Lbl", 8};
+
+    lim3Lbl.name = "lim3Lbl";
+    lim3Lbl.setText("3  Största förhållande mellan intilliggande spann, 1 :");
+    lim3Lbl.x = 0;
+    lim3Lbl.anchorTop = {"lim2Spin", 12};
+
+    lim3Spin.name = "lim3Spin";
+    lim3Spin.width = 90;
+    lim3Spin.setDecimals(2);
+    lim3Spin.setMin(0.01);
+    lim3Spin.setMax(100);
+    lim3Spin.setStep(0.05);
+    lim3Spin.setValue(2.5);
+    lim3Spin.x = 0;
+    lim3Spin.anchorTop = {"lim3Lbl", 4};
+
+    lim3Count.name = "lim3Count";
+    lim3Count.setText("–");
+    lim3Count.anchorLeft = {"lim3Spin", 12};
+    lim3Count.anchorTop = {"lim3Lbl", 8};
+
+    lim4Lbl.name = "lim4Lbl";
+    lim4Lbl.setText("4  aₙ,10 får inte understiga, × aₙ");
+    lim4Lbl.setToolTip("Effekt av punkt 4, en sträcka av korta spann: det lokala normalspannet kan ge större nedhäng, vilket ska beaktas vid kontroll av fri höjd mot mark och korsande objekt.");
+    lim4Lbl.x = 0;
+    lim4Lbl.anchorTop = {"lim3Spin", 12};
+
+    lim4Spin.name = "lim4Spin";
+    lim4Spin.width = 90;
+    lim4Spin.setDecimals(2);
+    lim4Spin.setMin(0.01);
+    lim4Spin.setMax(100);
+    lim4Spin.setStep(0.05);
+    lim4Spin.setValue(0.95);
+    lim4Spin.x = 0;
+    lim4Spin.anchorTop = {"lim4Lbl", 4};
+
+    lim4Count.name = "lim4Count";
+    lim4Count.setText("–");
+    lim4Count.anchorLeft = {"lim4Spin", 12};
+    lim4Count.anchorTop = {"lim4Lbl", 8};
+
+    lim5Lbl.name = "lim5Lbl";
+    lim5Lbl.setText("5  aₙ,10 får inte överstiga, × aₙ");
+    lim5Lbl.setToolTip("Effekt av punkt 5, en sträcka av långa spann: mindre nedhäng ger högre laster, vilket ska beaktas för stolpe, isolatorkedja och isolatorutslag.");
+    lim5Lbl.x = 0;
+    lim5Lbl.anchorTop = {"lim4Spin", 12};
+
+    lim5Spin.name = "lim5Spin";
+    lim5Spin.width = 90;
+    lim5Spin.setDecimals(2);
+    lim5Spin.setMin(0.01);
+    lim5Spin.setMax(100);
+    lim5Spin.setStep(0.05);
+    lim5Spin.setValue(1.15);
+    lim5Spin.x = 0;
+    lim5Spin.anchorTop = {"lim5Lbl", 4};
+
+    lim5Count.name = "lim5Count";
+    lim5Count.setText("–");
+    lim5Count.anchorLeft = {"lim5Spin", 12};
+    lim5Count.anchorTop = {"lim5Lbl", 8};
+
+    methodLbl.name = "methodLbl";
+    methodLbl.setText("Punkt 3 markerar raden och raden före. Punkt 4 och 5 kontrolleras från det elfte spannet: värdet är normalspannet för de 10 föregående spannen, aₙ,10, och kvoten mot aₙ. Normalspannsmetoden bygger på fri rörlighet av infästningspunkterna mellan avspänningsstolparna. Vid för stora avvikelser kan nedhänget anta en annan linbåge än normalspannets.");
+    methodLbl.setRole(glaze::Label::Role::Dim);
+    methodLbl.setWrap(true);
+    methodLbl.x = 0;
+    methodLbl.anchorTop = {"limitGrp", 12};
+    methodLbl.anchors = {true, true, true, false};
+    methodLbl.right = 12;
+
+    poleGrid.name = "poleGrid";
+    poleGrid.x = 16;
+    poleGrid.anchorTop = {"infoLbl", 8};
+    poleGrid.anchorRight = {"resultPanel", 16};
+    poleGrid.anchorBottom = {"cancelBtn", 16};
+    poleGrid.anchors = {true, true, true, true};
+    poleGrid.setHeaderLines(2);
+    poleGrid.setSortable(false);
+    poleGrid.setEditOnClick(false);
+    poleGrid.setColumns({{.text = "Stpnr", .width = 110, .sizing = glaze::ColumnSizing::Autosize}, {.text = "Spannlängd\nm", .width = 100, .align = glaze::Align::Right}, {.text = "H\nm", .width = 80, .align = glaze::Align::Right}, {.text = "1\na/aₙ", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "2\na/aₙ", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "3\ngrannspann", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "4\naₙ,10 / kvot", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "5\naₙ,10 / kvot", .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin}});
+    poleGrid.setColumnEditor(0, {glaze::DataGrid::Editor::Text});
+    poleGrid.setColumnEditor(1, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    poleGrid.setColumnEditor(2, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    poleGrid.setColumnEditor(3, {glaze::DataGrid::Editor::None});
+    poleGrid.setColumnEditor(4, {glaze::DataGrid::Editor::None});
+    poleGrid.setColumnEditor(5, {glaze::DataGrid::Editor::None});
+    poleGrid.setColumnEditor(6, {glaze::DataGrid::Editor::None});
+    poleGrid.setColumnEditor(7, {glaze::DataGrid::Editor::None});
+    poleGrid.setColumnToolTip(1, "Horisontellt spann före stolpen. Spannet före första stolpen ingår inte i summorna.");
+    poleGrid.setColumnToolTip(2, "Plushöjd för mark eller infästning (valfri)");
+    poleGrid.setColumnToolTip(3, "Kontroll 1: spannlängden delad med aₙ. Röd när den överstiger den längsta tillåtna.");
+    poleGrid.setColumnToolTip(4, "Kontroll 2: spannlängden delad med aₙ. Röd när den understiger den kortaste tillåtna.");
+    poleGrid.setColumnToolTip(5, "Kontroll 3: större delat med mindre av två intilliggande spann. Röd på raden och raden före när förhållandet överstiger gränsen.");
+    poleGrid.setColumnToolTip(6, "Kontroll 4: normalspannet för de 10 föregående spannen och kvoten mot aₙ. Röd när kvoten understiger gränsen.");
+    poleGrid.setColumnToolTip(7, "Kontroll 5: normalspannet för de 10 föregående spannen och kvoten mot aₙ. Röd när kvoten överstiger gränsen.");
+
+    okBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { okBtnClicked(s, e); };
+    clearBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { clearBtnClicked(s, e); };
+    noteTxt.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { noteChanged(s, e); };
+    lim1Spin.onCommit = [this](glaze::Widget* s, glaze::ChangeArgs& e) { limitCommitted(s, e); };
+    lim2Spin.onCommit = [this](glaze::Widget* s, glaze::ChangeArgs& e) { limitCommitted(s, e); };
+    lim3Spin.onCommit = [this](glaze::Widget* s, glaze::ChangeArgs& e) { limitCommitted(s, e); };
+    lim4Spin.onCommit = [this](glaze::Widget* s, glaze::ChangeArgs& e) { limitCommitted(s, e); };
+    lim5Spin.onCommit = [this](glaze::Widget* s, glaze::ChangeArgs& e) { limitCommitted(s, e); };
+    poleGrid.onCommit = [this](glaze::Widget* s, glaze::CellChangeArgs& e) { poleGridCommitted(s, e); };
+    poleGrid.onKeyDown = [this](glaze::Widget* s, glaze::KeyArgs& e) { poleGridKeyDown(s, e); };
+    poleGrid.onMouseUp = [this](glaze::Widget* s, glaze::MouseArgs& e) { poleGridMouseUp(s, e); };
+    poleGrid.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { poleGridContextMenu(s, e); };
+    glaze::AppWindow::onLoad = [this](glaze::Widget* s, glaze::EventArgs& e) { onLoad(s, e); };
+    glaze::AppWindow::onClose = [this](glaze::Widget* s, glaze::CloseArgs& e) { onClosing(s, e); };
+
+    root().adopt(noteLbl);
+    root().adopt(noteTxt);
+    root().adopt(docLbl);
+    root().adopt(infoLbl);
+    root().adopt(cancelBtn);
+    root().adopt(okBtn);
+    root().adopt(clearBtn);
+    root().adopt(resultPanel);
+    root().adopt(poleGrid);
+    resultPanel.adopt(resultGrp);
+    resultPanel.adopt(limitGrp);
+    resultPanel.adopt(methodLbl);
+    resultGrp.adopt(anLbl);
+    resultGrp.adopt(anValue);
+    resultGrp.adopt(anDhLbl);
+    resultGrp.adopt(anDhValue);
+    resultGrp.adopt(meanLbl);
+    resultGrp.adopt(meanValue);
+    resultGrp.adopt(totalLbl);
+    resultGrp.adopt(totalValue);
+    resultGrp.adopt(countLbl);
+    resultGrp.adopt(countValue);
+    resultGrp.adopt(sectionLbl);
+    resultGrp.adopt(sectionValue);
+    limitGrp.adopt(lim1Lbl);
+    limitGrp.adopt(lim1Spin);
+    limitGrp.adopt(lim1Count);
+    limitGrp.adopt(lim2Lbl);
+    limitGrp.adopt(lim2Spin);
+    limitGrp.adopt(lim2Count);
+    limitGrp.adopt(lim3Lbl);
+    limitGrp.adopt(lim3Spin);
+    limitGrp.adopt(lim3Count);
+    limitGrp.adopt(lim4Lbl);
+    limitGrp.adopt(lim4Spin);
+    limitGrp.adopt(lim4Count);
+    limitGrp.adopt(lim5Lbl);
+    limitGrp.adopt(lim5Spin);
+    limitGrp.adopt(lim5Count);
+}
