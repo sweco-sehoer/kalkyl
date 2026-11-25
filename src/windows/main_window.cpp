@@ -1,14 +1,18 @@
 #include "main_window.h"
 
 #include "conductor_dialog.h"
+#include "line_calc_dialog.h"
 #include "normal_span_dialog.h"
 
 #include "appearance/appearance.h"
-#include "calc/table_text.h"
+#include "lineCalc/line_calc.h"
+#include "lineCalc/load_cases.h"
+#include "tableText/table_text.h"
 #include "platform/files.h"
 #include "version/version.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <ctime>
 #include <optional>
@@ -36,6 +40,11 @@ constexpr const char* kSameText = "Samma";
 constexpr int kValueColumn = 1;
 // Tooltipen på en normalspannsrad utan kopplad beräkning.
 constexpr const char* kNsRowHint = "Högerklicka för att lägga till eller koppla en normalspannsberäkning";
+// Tooltipen på en linberäkningsrad utan kopplad beräkning.
+constexpr const char* kLcRowHint = "Högerklicka för att lägga till eller koppla en linberäkning";
+// Kolumnen Mall och Högsta utnyttjandegrad i listan Linberäkning, där Fel och över gränsen är röda.
+constexpr int kLcMallColumn = 7;
+constexpr int kLcUtilColumn = 8;
 
 // Radbrytning i texter. Skrivs som tecken så att ingen escape-sekvens behövs i källan.
 const std::string kNl(1, char{10});
@@ -60,8 +69,9 @@ enum class Unit { Choice, Mpa, Meter, Celsius, Mall };
 using Ns = std::pair<Wire, Stage>;
 
 // En rad i Dokumentation: texten (och texten när topplinorna är samma), färgen, när den visas,
-// hur värdet matas in, nyckeln i projektet (tom för normalspannsraderna, vars nyckel kommer ur
-// ns), förvalet för Värde och lina och skede för normalspannsraderna. Raderna 0-3 visas alltid.
+// hur värdet matas in, nyckeln i projektet (tom för beräkningsraderna, vars nyckel kommer ur
+// ns eller lc), förvalet för Värde, lina och skede för normalspannsraderna (ns) och för
+// linberäkningsraderna (lc). Raderna 0-3 visas alltid.
 struct ByggPmRowDef {
     const char* label;
     const char* sameLabel;
@@ -71,47 +81,69 @@ struct ByggPmRowDef {
     const char* key;
     const char* value;
     std::optional<Ns> ns;
+    std::optional<Ns> lc;
 };
 
 const ByggPmRowDef kByggPmRows[] = {
-    {"Faslina", nullptr, &kBlue, Side::Both, Unit::Choice, "phase_conductor", "", std::nullopt},
-    {"Konfiguration", nullptr, &kBlue, Side::Both, Unit::Choice, "configuration", "Singel", std::nullopt},
-    {"Topplina vänster", nullptr, &kBlue, Side::Both, Unit::Choice, "top_conductor_left", "", std::nullopt},
-    {"Topplina höger", nullptr, &kBlue, Side::Both, Unit::Choice, "top_conductor_right", "Samma", std::nullopt},
-    {"Uppspänning fas", nullptr, &kGreen, Side::Both, Unit::Mpa, "tension_phase", "", std::nullopt},
-    {"Uppspänning topp vänster", "Uppspänning topp", &kGreen, Side::Left, Unit::Mpa, "tension_top_left", "", std::nullopt},
-    {"Uppspänning topp höger", nullptr, &kGreen, Side::Right, Unit::Mpa, "tension_top_right", "", std::nullopt},
-    {"Normalspann faslina", nullptr, &kGreen, Side::Both, Unit::Meter, "normal_span_phase", "", std::nullopt},
-    {"Normalspann topplina vänster", "Normalspann topplina", &kGreen, Side::Left, Unit::Meter, "normal_span_top_left", "", std::nullopt},
-    {"Normalspann topplina höger", nullptr, &kGreen, Side::Right, Unit::Meter, "normal_span_top_right", "", std::nullopt},
-    {"Max temp", nullptr, &kAmber, Side::Both, Unit::Celsius, "temp_max", "", std::nullopt},
-    {"Min temp", nullptr, &kAmber, Side::Both, Unit::Celsius, "temp_min", "", std::nullopt},
-    // Beräkningarna: normalspannsberäkning och linberäkning i par. Före ombyggnation är lila och
-    // efter ombyggnation rosa. Med egen topplina höger kommer vänster-paret före höger-paret.
-    {"Normalspannsberäkning faslina före ombyggnation", nullptr, &kPurple, Side::Both, Unit::Meter, nullptr, "", Ns{Wire::Phase, Stage::Before}},
-    {"Linberäkning faslina före ombyggnation", nullptr, &kPurple, Side::Both, Unit::Mall, "line_calc_phase_before", "", std::nullopt},
-    {"Normalspannsberäkning faslina efter ombyggnation", nullptr, &kRose, Side::Both, Unit::Meter, nullptr, "", Ns{Wire::Phase, Stage::After}},
-    {"Linberäkning faslina efter ombyggnation", nullptr, &kRose, Side::Both, Unit::Mall, "line_calc_phase_after", "", std::nullopt},
-    {"Normalspannsberäkning topplina vänster före ombyggnation", "Normalspannsberäkning topplina före ombyggnation", &kPurple, Side::Left, Unit::Meter, nullptr, "", Ns{Wire::TopLeft, Stage::Before}},
-    {"Linberäkning topplina vänster före ombyggnation", "Linberäkning topplina före ombyggnation", &kPurple, Side::Left, Unit::Mall, "line_calc_top_left_before", "", std::nullopt},
-    {"Normalspannsberäkning topplina höger före ombyggnation", nullptr, &kPurple, Side::Right, Unit::Meter, nullptr, "", Ns{Wire::TopRight, Stage::Before}},
-    {"Linberäkning topplina höger före ombyggnation", nullptr, &kPurple, Side::Right, Unit::Mall, "line_calc_top_right_before", "", std::nullopt},
-    {"Normalspannsberäkning topplina vänster efter ombyggnation", "Normalspannsberäkning topplina efter ombyggnation", &kRose, Side::Left, Unit::Meter, nullptr, "", Ns{Wire::TopLeft, Stage::After}},
-    {"Linberäkning topplina vänster efter ombyggnation", "Linberäkning topplina efter ombyggnation", &kRose, Side::Left, Unit::Mall, "line_calc_top_left_after", "", std::nullopt},
-    {"Normalspannsberäkning topplina höger efter ombyggnation", nullptr, &kRose, Side::Right, Unit::Meter, nullptr, "", Ns{Wire::TopRight, Stage::After}},
-    {"Linberäkning topplina höger efter ombyggnation", nullptr, &kRose, Side::Right, Unit::Mall, "line_calc_top_right_after", "", std::nullopt},
+    {"Faslina", nullptr, &kBlue, Side::Both, Unit::Choice, "phase_conductor", "", std::nullopt, std::nullopt},
+    {"Konfiguration", nullptr, &kBlue, Side::Both, Unit::Choice, "configuration", "Singel", std::nullopt, std::nullopt},
+    {"Topplina vänster", nullptr, &kBlue, Side::Both, Unit::Choice, "top_conductor_left", "", std::nullopt, std::nullopt},
+    {"Topplina höger", nullptr, &kBlue, Side::Both, Unit::Choice, "top_conductor_right", "Samma", std::nullopt, std::nullopt},
+    {"Uppspänning fas", nullptr, &kGreen, Side::Both, Unit::Mpa, "tension_phase", "", std::nullopt, std::nullopt},
+    {"Uppspänning topp vänster", "Uppspänning topp", &kGreen, Side::Left, Unit::Mpa, "tension_top_left", "", std::nullopt, std::nullopt},
+    {"Uppspänning topp höger", nullptr, &kGreen, Side::Right, Unit::Mpa, "tension_top_right", "", std::nullopt, std::nullopt},
+    {"Normalspann faslina", nullptr, &kGreen, Side::Both, Unit::Meter, "normal_span_phase", "", std::nullopt, std::nullopt},
+    {"Normalspann topplina vänster", "Normalspann topplina", &kGreen, Side::Left, Unit::Meter, "normal_span_top_left", "", std::nullopt, std::nullopt},
+    {"Normalspann topplina höger", nullptr, &kGreen, Side::Right, Unit::Meter, "normal_span_top_right", "", std::nullopt, std::nullopt},
+    {"Max temp", nullptr, &kAmber, Side::Both, Unit::Celsius, "temp_max", "", std::nullopt, std::nullopt},
+    {"Min temp", nullptr, &kAmber, Side::Both, Unit::Celsius, "temp_min", "", std::nullopt, std::nullopt},
+    // Beräkningarna: normalspannsberäkning och linberäkning i par. Före ombyggnad är lila och
+    // efter ombyggnad rosa. Med egen topplina höger kommer vänster-paret före höger-paret.
+    {"Faslina normalspannsberäkning före ombyggnad", nullptr, &kPurple, Side::Both, Unit::Meter, nullptr, "", Ns{Wire::Phase, Stage::Before}, std::nullopt},
+    {"Faslina linberäkning före ombyggnad", nullptr, &kPurple, Side::Both, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::Phase, Stage::Before}},
+    {"Faslina normalspannsberäkning efter ombyggnad", nullptr, &kRose, Side::Both, Unit::Meter, nullptr, "", Ns{Wire::Phase, Stage::After}, std::nullopt},
+    {"Faslina linberäkning efter ombyggnad", nullptr, &kRose, Side::Both, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::Phase, Stage::After}},
+    {"Topplina vänster normalspannsberäkning före ombyggnad", "Topplinor normalspannsberäkning före ombyggnad", &kPurple, Side::Left, Unit::Meter, nullptr, "", Ns{Wire::TopLeft, Stage::Before}, std::nullopt},
+    {"Topplina vänster linberäkning före ombyggnad", "Topplinor linberäkning före ombyggnad", &kPurple, Side::Left, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::TopLeft, Stage::Before}},
+    {"Topplina höger normalspannsberäkning före ombyggnad", nullptr, &kPurple, Side::Right, Unit::Meter, nullptr, "", Ns{Wire::TopRight, Stage::Before}, std::nullopt},
+    {"Topplina höger linberäkning före ombyggnad", nullptr, &kPurple, Side::Right, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::TopRight, Stage::Before}},
+    {"Topplina vänster normalspannsberäkning efter ombyggnad", "Topplinor normalspannsberäkning efter ombyggnad", &kRose, Side::Left, Unit::Meter, nullptr, "", Ns{Wire::TopLeft, Stage::After}, std::nullopt},
+    {"Topplina vänster linberäkning efter ombyggnad", "Topplinor linberäkning efter ombyggnad", &kRose, Side::Left, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::TopLeft, Stage::After}},
+    {"Topplina höger normalspannsberäkning efter ombyggnad", nullptr, &kRose, Side::Right, Unit::Meter, nullptr, "", Ns{Wire::TopRight, Stage::After}, std::nullopt},
+    {"Topplina höger linberäkning efter ombyggnad", nullptr, &kRose, Side::Right, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::TopRight, Stage::After}},
 };
 
 constexpr std::size_t kRowCount = std::size(kByggPmRows);
 
+// Dokumentationens förval i ett nytt projekt: nyckel, värde och om värdet är en lina ur
+// linregistret. Topplina höger står kvar på förvalet Samma, så topplinan har en rad per uppgift.
+struct NewProjectDefault {
+    const char* key;
+    const char* value;
+    bool conductor;
+};
+
+constexpr NewProjectDefault kNewProjectDefaults[] = {
+    {"phase_conductor", "593 mm² FeAl CURLEW", true},
+    {"configuration", "Triplex", false},
+    {"top_conductor_left", "241 mm² FeAl ATLE", true},
+    {"tension_phase", "60", false},
+    {"tension_top_left", "90", false},
+    {"temp_max", "50", false},
+    {"temp_min", "-50", false},
+};
+
 // Platsen för Topplina höger i kByggPmRows. Dess värde avgör läget.
 constexpr std::size_t kRightTopDef = 3;
 
-// Radens nyckel i projektet: den fasta nyckeln, eller normalspannsnyckeln ur lina och skede.
+// Radens nyckel i projektet: den fasta nyckeln, eller normalspanns- eller linberäkningsnyckeln
+// ur lina och skede.
 std::string rowKey(const ByggPmRowDef& d)
 {
     if (d.ns)
         return kalkyl::projectdb::normalSpanDocKey(d.ns->first, d.ns->second);
+    if (d.lc)
+        return kalkyl::projectdb::lineCalcDocKey(d.lc->first, d.lc->second);
     return d.key;
 }
 
@@ -174,7 +206,7 @@ std::string poleText(const std::string& pole)
 
 // Första och sista stolpens Stpnr, ur resultatet när det finns och annars ur stolparna.
 std::pair<std::string, std::string> polesOf(const kalkyl::projectdb::NormalSpan& ns,
-                                            const kalkyl::calc::SpanCalculation& calc)
+                                            const kalkyl::ancalc::SpanCalculation& calc)
 {
     if (calc.result)
         return {calc.result->fromPole, calc.result->toPole};
@@ -190,17 +222,17 @@ std::pair<std::string, std::string> polesOf(const kalkyl::projectdb::NormalSpan&
 }
 
 // "ST0252 – ST0532", med "–" för en tom stolpe.
-std::string rangeText(const kalkyl::projectdb::NormalSpan& ns, const kalkyl::calc::SpanCalculation& calc)
+std::string rangeText(const kalkyl::projectdb::NormalSpan& ns, const kalkyl::ancalc::SpanCalculation& calc)
 {
     const auto poles = polesOf(ns, calc);
     return poleText(poles.first) + " – " + poleText(poles.second);
 }
 
 // Det första felet i beräkningen (med rad när den finns), eller tomt när den saknar fel.
-std::string firstError(const kalkyl::calc::SpanCalculation& calc)
+std::string firstError(const kalkyl::ancalc::SpanCalculation& calc)
 {
     for (const auto& issue : calc.issues) {
-        if (issue.kind != kalkyl::calc::IssueKind::Error)
+        if (issue.kind != kalkyl::ancalc::IssueKind::Error)
             continue;
         if (issue.poleIndex >= 0)
             return "rad " + std::to_string(issue.poleIndex + 1) + ", " + issue.message;
@@ -210,9 +242,117 @@ std::string firstError(const kalkyl::calc::SpanCalculation& calc)
 }
 
 // Summan av antalen avvikelser i kontrollerna 1-5.
-int deviationCount(const kalkyl::calc::SpanResult& r)
+int deviationCount(const kalkyl::ancalc::SpanResult& r)
 {
     return r.tooLongCount + r.tooShortCount + r.adjacentCount + r.localLowCount + r.localHighCount;
+}
+
+// Upplysningens text, med lastfallet först när den gäller ett lastfall ("Lastfall 4: ...").
+std::string issueText(const kalkyl::linecalc::LineIssue& issue)
+{
+    if (issue.caseId > 0)
+        return "Lastfall " + std::to_string(issue.caseId) + ": " + issue.message;
+    return issue.message;
+}
+
+// Första upplysningen av slaget kind, med " (och n till)" när fler av samma slag finns.
+// Tomt svar när ingen finns.
+std::string firstIssueOf(const kalkyl::linecalc::LineCalculation& calc, kalkyl::linecalc::LineIssueKind kind)
+{
+    std::string first;
+    int count = 0;
+    for (const auto& issue : calc.issues) {
+        if (issue.kind != kind)
+            continue;
+        if (count == 0)
+            first = issueText(issue);
+        ++count;
+    }
+    if (count > 1)
+        first += " (och " + std::to_string(count - 1) + " till)";
+    return first;
+}
+
+// Sant när beräkningen saknar resultat på grund av ett fel (inte bara saknade indata).
+bool hasLineError(const kalkyl::linecalc::LineCalculation& calc)
+{
+    return !calc.result && !firstIssueOf(calc, kalkyl::linecalc::LineIssueKind::Error).empty();
+}
+
+// Stakningsmallen som heltal, eller "–" utan resultat.
+std::string mallText(const kalkyl::linecalc::LineCalculation& calc)
+{
+    if (!calc.result)
+        return "–";
+    return kalkyl::tabletext::formatDecimal(std::round(calc.result->stakingMall), 0, '.');
+}
+
+// Talet i kortaste form med decimalkomma och riktigt minustecken, t.ex. "−50".
+std::string shortNumber(double v)
+{
+    std::string text = kalkyl::tabletext::formatDecimal(v, -1, ',');
+    if (!text.empty() && text[0] == '-')
+        text.replace(0, 1, "−");
+    return text;
+}
+
+// Lastfallen vars utnyttjandegrad är över gränsen, t.ex. "4, 5". Tomt när inget är över.
+std::string overCases(const kalkyl::linecalc::LineResult& r)
+{
+    std::string text;
+    for (const auto& c : r.cases) {
+        if (!c.overUtilization)
+            continue;
+        if (!text.empty())
+            text += ", ";
+        text += std::to_string(c.id);
+    }
+    return text;
+}
+
+// Högsta utnyttjandegraden som heltal och lastfallen som visar samma värde, t.ex. "40 (4, 5)".
+// "–" utan resultat eller utan brottlast.
+std::string utilizationText(const kalkyl::linecalc::LineCalculation& calc)
+{
+    if (!calc.result)
+        return "–";
+    double best = 0;
+    bool any = false;
+    for (const auto& c : calc.result->cases) {
+        if (c.utilizationPercent && (!any || *c.utilizationPercent > best)) {
+            best = *c.utilizationPercent;
+            any = true;
+        }
+    }
+    if (!any)
+        return "–";
+    const double shown = std::round(best);
+    std::string ids;
+    for (const auto& c : calc.result->cases) {
+        if (c.utilizationPercent && std::round(*c.utilizationPercent) == shown)
+            ids += (ids.empty() ? "" : ", ") + std::to_string(c.id);
+    }
+    return kalkyl::tabletext::formatDecimal(shown, 0, '.') + " (" + ids + ")";
+}
+
+// Linans namn i listor och tooltips: "(utan namn)" för lindata utan lina, "–" utan lindata.
+std::string conductorText(const kalkyl::linecalc::LineInput& input)
+{
+    if (!input.conductor)
+        return "–";
+    return input.conductor->name.empty() ? std::string("(utan namn)") : input.conductor->name;
+}
+
+// aₙ i en decimal, eller "–" när det saknas.
+std::string spanText(const kalkyl::linecalc::LineInput& input)
+{
+    return input.normalSpanM ? kalkyl::tabletext::formatDecimal(*input.normalSpanM, 1, ',') : std::string("–");
+}
+
+// σ₀ i kortaste form, eller "–" när det saknas.
+std::string tensionText(const kalkyl::linecalc::LineInput& input)
+{
+    return input.tensionMpa ? shortNumber(*input.tensionMpa) : std::string("–");
 }
 
 } // namespace
@@ -278,12 +418,44 @@ void MainWindow::onLoad(glaze::Widget*, glaze::EventArgs&)
                                minutes == autosaveMinutes_);
     }
 
+    // Ett nytt projekt får förvalen och sparas direkt, så att filen har dem från början.
+    const bool defaults = project_->created() && !readOnly();
+    if (defaults)
+        applyNewProjectDefaults();
+
     loadProjectData();
     rebuildByggPm();
     refreshNormalSpans();
+    refreshLineCalcs();
     shadeStolpRows();
     updateTitle();
     restartAutosave();
+    if (defaults && project_->isModified())
+        startSave(SaveKind::Auto);
+}
+
+// Skriver förvalen i ett nytt projekt. Linorna kopieras ur linregistret med setDocConductor,
+// övriga värden skrivs med setDocValue. Saknas en lina i registret hoppas den över.
+void MainWindow::applyNewProjectDefaults()
+{
+    const auto registry = sys_->conductors();
+    if (!registry)
+        gfx::log("Linregistret kunde inte läsas för förvalen: %s", registry.error().detail.c_str());
+    for (const auto& d : kNewProjectDefaults) {
+        kalkyl::core::Result<void> saved;
+        if (d.conductor) {
+            const auto* chosen = registry ? findConductor(registry.value(), d.value) : nullptr;
+            if (!chosen) {
+                gfx::log("Förvalet %s finns inte i linregistret.", d.value);
+                continue;
+            }
+            saved = kalkyl::projectdb::setDocConductor(*project_, d.key, *chosen);
+        } else {
+            saved = kalkyl::projectdb::setDocValue(*project_, {d.key, d.value, ""});
+        }
+        if (!saved)
+            gfx::log("Förvalet %s kunde inte sparas: %s", d.key, saved.error().detail.c_str());
+    }
 }
 
 // Stolptabellen får samma gula ton och samma växling som temperaturraderna i Dokumentation:
@@ -464,6 +636,7 @@ void MainWindow::rebuildByggPm()
     }
     fillConductorChoices();
     showNormalSpanRows();
+    showLineCalcRows();
 }
 
 // En cell i Dokumentation sparades. Linval går via chooseConductor, "Samma" och alla andra celler
@@ -497,11 +670,11 @@ void MainWindow::byggPmGridCommitted(glaze::Widget*, glaze::CellChangeArgs& e)
         }
         if (ok && i == kRightTopIndex && (text != kSameText) != byggPmSplit_) {
             // Läget byts i pump-svansen, så att tabellen inte byggs om mitt i sin egen händelse.
-            // Listan i fliken Normalspann visar radernas korta namn, som följer läget.
+            // Listorna i flikarna Normalspann och Linberäkning visar radernas korta namn, som följer läget.
             glaze::app().post([this] {
                 rebuildByggPm();
                 fillNormalSpanList();
-                updateNsButtons();
+                fillLineCalcList();
             });
         }
     }
@@ -512,6 +685,9 @@ void MainWindow::byggPmGridCommitted(glaze::Widget*, glaze::CellChangeArgs& e)
         byggPmGrid.setCell(e.row, e.column, byggPmValues_[def][static_cast<std::size_t>(e.column - 1)]);
     updateTitle();
     fillConductorChoices();
+    // En ändrad uppgift kan ändra linberäkningarna: raderna och listan räknas om direkt.
+    if (ok)
+        refreshLineCalcs();
 }
 
 // Sparar den ändrade cellen (kolumn 1 eller 2) för raden def i projektet. Bara den ändrade
@@ -571,6 +747,7 @@ void MainWindow::reloadAfterChange()
 {
     loadProjectData();
     refreshNormalSpans();
+    refreshLineCalcs();
     fillConductorChoices();
     updateTitle();
 }
@@ -591,9 +768,9 @@ std::string MainWindow::fullDocLabel(const std::string& key) const
 std::string MainWindow::shortDocLabel(const std::string& key) const
 {
     const std::size_t i = defIndexForKey(key);
-    if (i == kRowCount || !kByggPmRows[i].ns)
+    if (i == kRowCount || (!kByggPmRows[i].ns && !kByggPmRows[i].lc))
         return key;
-    const Ns ns = *kByggPmRows[i].ns;
+    const Ns ns = kByggPmRows[i].ns ? *kByggPmRows[i].ns : *kByggPmRows[i].lc;
     const std::string stage = ns.second == Stage::Before ? "före" : "efter";
     switch (ns.first) {
     case Wire::Phase:    return "Fas " + stage;
@@ -620,6 +797,24 @@ std::string MainWindow::shortRowsText(const kalkyl::projectdb::NormalSpan& ns) c
     return text.empty() ? std::string("–") : text;
 }
 
+// De kopplade radernas korta namn för en linberäkning, i radordning och skilda med komma.
+// Utan rader blir svaret "–".
+std::string MainWindow::shortRowsText(const kalkyl::projectdb::LineCalc& lc) const
+{
+    std::string text;
+    for (const auto& d : kByggPmRows) {
+        if (!d.lc)
+            continue;
+        const std::string key = rowKey(d);
+        if (std::find(lc.docKeys.begin(), lc.docKeys.end(), key) == lc.docKeys.end())
+            continue;
+        if (!text.empty())
+            text += ", ";
+        text += shortDocLabel(key);
+    }
+    return text.empty() ? std::string("–") : text;
+}
+
 // Nyckel och radtext för de sex normalspannsraderna, i radordning.
 std::vector<std::pair<std::string, std::string>> MainWindow::docRowLabels() const
 {
@@ -631,6 +826,42 @@ std::vector<std::pair<std::string, std::string>> MainWindow::docRowLabels() cons
         labels.emplace_back(key, fullDocLabel(key));
     }
     return labels;
+}
+
+// Nyckel och radtext för de sex linberäkningsraderna, i radordning, till formuläret.
+std::vector<std::pair<std::string, std::string>> MainWindow::lineCalcRowLabels() const
+{
+    std::vector<std::pair<std::string, std::string>> labels;
+    for (const auto& d : kByggPmRows) {
+        if (!d.lc)
+            continue;
+        const std::string key = rowKey(d);
+        labels.emplace_back(key, fullDocLabel(key));
+    }
+    return labels;
+}
+
+// Platsen i lineCalcs_ för beräkningen som linberäkningsraden key visar, eller -1.
+int MainWindow::linkedLineCalcIndex(const std::string& key) const
+{
+    for (std::size_t i = 0; i < lineCalcs_.size(); ++i) {
+        const auto& keys = lineCalcs_[i].docKeys;
+        if (std::find(keys.begin(), keys.end(), key) != keys.end())
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
+// Texten i undermenyn Koppla befintlig: lina, aₙ, σ₀, mall och raderna beräkningen visas på.
+// Exempel: "CURLEW · aₙ 314,6 m · σ₀ 90 MPa · Mall 354 · Fas före".
+std::string MainWindow::lineCalcSummary(std::size_t index) const
+{
+    const auto& lc = lineCalcs_[index];
+    const auto& input = lcResolved_[index].input;
+    std::string text = conductorText(input) + " · aₙ " + spanText(input) + " m · σ₀ " + tensionText(input) +
+                       " MPa · Mall " + mallText(lcCalcs_[index]) + " · ";
+    text += lc.docKeys.empty() ? std::string("ej kopplad") : shortRowsText(lc);
+    return text;
 }
 
 // Platsen i normalSpans_ för beräkningen som raden key visar, eller -1.
@@ -658,7 +889,7 @@ void MainWindow::refreshNormalSpans()
     } else {
         normalSpans_ = std::move(spans.value());
         for (const auto& ns : normalSpans_)
-            nsCalcs_.push_back(kalkyl::calc::calculateNormalSpan(ns.poles, ns.limits));
+            nsCalcs_.push_back(kalkyl::ancalc::calculateNormalSpan(ns.poles, ns.limits));
     }
     showNormalSpanRows();
     fillNormalSpanList();
@@ -680,7 +911,7 @@ void MainWindow::showNormalSpanRows()
             const auto& calc = nsCalcs_[static_cast<std::size_t>(index)];
             byggPmGrid.setCellEditor(row, kValueColumn, numberEditor(Unit::Meter, true, true));
             if (calc.result) {
-                byggPmGrid.setCell(row, kValueColumn, kalkyl::calc::formatDecimal(calc.result->an, -1, '.'));
+                byggPmGrid.setCell(row, kValueColumn, kalkyl::tabletext::formatDecimal(calc.result->an, -1, '.'));
                 byggPmGrid.setCellImage(row, kValueColumn, glaze::stockIcon(glaze::StockIcon::Sum));
                 byggPmGrid.setCellToolTip(row, kValueColumn,
                                           "Beräknad " + rangeText(normalSpans_[static_cast<std::size_t>(index)], calc) +
@@ -718,7 +949,7 @@ void MainWindow::byggPmGridContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e
     for (std::size_t i = 0; i < std::size(kConductorRows); ++i)
         if (kConductorRows[i] == row)
             conductorIndex = static_cast<int>(i);
-    if (conductorIndex < 0 && !d.ns)
+    if (conductorIndex < 0 && !d.ns && !d.lc)
         return;
 
     commitEdits();
@@ -746,6 +977,78 @@ void MainWindow::byggPmGridContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e
                 }
                 reloadAfterChange();
                 statusBar.setPanelText(savePanel_, "Linan " + fresh.name + " uppdaterad från linregistret.");
+            };
+        }
+        byggPmMenu_.popupAt(byggPmGrid, e.x, e.y);
+        return;
+    }
+
+    // Linberäkningsraden: Lägg till (kopplad, utan formulär), Lägg till manuell…, Koppla befintlig och Manuellt värde, eller
+    // Ändra…, Koppla bort och Ta bort… när en beräkning visas. Skrivskyddat finns bara Visa….
+    if (d.lc) {
+        const std::string lcKey = rowKey(d);
+        const int lcIndex = linkedLineCalcIndex(lcKey);
+        if (lcIndex >= 0) {
+            const auto& linked = lineCalcs_[static_cast<std::size_t>(lcIndex)];
+            const std::int64_t id = linked.id;
+            const bool wasDocSource = !linked.docSource.empty();
+            if (readOnly()) {
+                byggPmMenu_.addItem("Visa…").onClick = [this, id] {
+                    openLineCalcDialog(LcOpen::Existing, id, "");
+                };
+            } else {
+                byggPmMenu_.addItem("Ändra…").onClick = [this, id] {
+                    openLineCalcDialog(LcOpen::Existing, id, "");
+                };
+                byggPmMenu_.addItem("Koppla bort").onClick = [this, lcKey, wasDocSource] {
+                    auto done = kalkyl::projectdb::unlinkDocRow(*project_, lcKey);
+                    if (!done) {
+                        glaze::messageBox(*this, done.error().message, "Kalkyl", glaze::MessageBoxButtons::OK,
+                                          glaze::MessageBoxType::Error);
+                        return;
+                    }
+                    reloadAfterChange();
+                    if (wasDocSource)
+                        statusBar.setPanelText(savePanel_,
+                                               "Linberäkningen är bortkopplad och har nu egna indata. "
+                                               "Den finns kvar i fliken Linberäkning.");
+                };
+                byggPmMenu_.addSeparator();
+                byggPmMenu_.addItem("Ta bort…").onClick = [this, id] { removeLineCalcAsked(id); };
+            }
+        } else {
+            if (readOnly())
+                return;
+            byggPmMenu_.addItem("Lägg till").onClick = [this, lcKey] { addLinkedLineCalc(lcKey); };
+            byggPmMenu_.addItem("Lägg till manuell…").onClick = [this, lcKey] {
+                openLineCalcDialog(LcOpen::NewManualForRow, 0, lcKey);
+            };
+
+            // Undermenyn har en post per manuell beräkning. En kopplad beräkning hör till sin rad.
+            glaze::MenuItem& link = byggPmMenu_.addSubmenu("Koppla befintlig");
+            bool anyManual = false;
+            for (std::size_t i = 0; i < lineCalcs_.size(); ++i) {
+                if (!lineCalcs_[i].docSource.empty())
+                    continue;
+                anyManual = true;
+                glaze::MenuItem entry;
+                entry.text = lineCalcSummary(i);
+                const std::int64_t id = lineCalcs_[i].id;
+                entry.onClick = [this, id, lcKey] {
+                    auto done = kalkyl::projectdb::linkLineCalc(*project_, id, lcKey);
+                    if (!done)
+                        glaze::messageBox(*this, done.error().message, "Kalkyl", glaze::MessageBoxButtons::OK,
+                                          glaze::MessageBoxType::Error);
+                    reloadAfterChange();
+                };
+                link.submenu.push_back(std::move(entry));
+            }
+            link.enabled = anyManual;
+
+            byggPmMenu_.addSeparator();
+            byggPmMenu_.addItem("Manuellt värde").onClick = [this, row] {
+                byggPmGrid.setCurrentCell(row, kValueColumn);
+                byggPmGrid.beginEdit();
             };
         }
         byggPmMenu_.popupAt(byggPmGrid, e.x, e.y);
@@ -789,7 +1092,7 @@ void MainWindow::byggPmGridContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e
             const auto& ns = normalSpans_[i];
             const auto& calc = nsCalcs_[i];
             std::string text = rangeText(ns, calc) + " · ";
-            text += calc.result ? kalkyl::calc::formatDecimal(calc.result->an, 1) + " m" : std::string("fel");
+            text += calc.result ? kalkyl::tabletext::formatDecimal(calc.result->an, 1) + " m" : std::string("fel");
             text += " · " + (ns.docKeys.empty() ? std::string("ej kopplad") : shortRowsText(ns));
             glaze::MenuItem entry;
             entry.text = text;
@@ -859,7 +1162,7 @@ void MainWindow::removeNormalSpanAsked(std::int64_t id)
     std::string text = "Ta bort normalspannsberäkningen " + rangeText(ns, calc) + " (";
     if (calc.result)
         text += std::to_string(calc.result->spanCount) + " spann, aₙ " +
-                kalkyl::calc::formatDecimal(calc.result->an, 1) + " m";
+                kalkyl::tabletext::formatDecimal(calc.result->an, 1) + " m";
     else
         text += "beräkningen har fel";
     text += ") ur projektet?" + kNl + kNl;
@@ -911,9 +1214,9 @@ void MainWindow::fillNormalSpanList()
         row.cells = {poleText(poles.first),
                      poleText(poles.second),
                      calc.result ? std::to_string(calc.result->spanCount) : std::string("–"),
-                     calc.result ? kalkyl::calc::formatDecimal(calc.result->totalM, 1) : std::string("–"),
-                     calc.result ? kalkyl::calc::formatDecimal(calc.result->an, 1) : std::string("–"),
-                     calc.result && calc.result->anDeltaH ? kalkyl::calc::formatDecimal(*calc.result->anDeltaH, 1)
+                     calc.result ? kalkyl::tabletext::formatDecimal(calc.result->totalM, 1) : std::string("–"),
+                     calc.result ? kalkyl::tabletext::formatDecimal(calc.result->an, 1) : std::string("–"),
+                     calc.result && calc.result->anDeltaH ? kalkyl::tabletext::formatDecimal(*calc.result->anDeltaH, 1)
                                                           : std::string("–"),
                      calc.result ? std::to_string(deviationCount(*calc.result)) : std::string("Fel"),
                      shortRowsText(ns),
@@ -1056,6 +1359,386 @@ void MainWindow::nsListaContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e)
         nsMenu_.addItem("Ta bort…").onClick = [this, id] { removeNormalSpanAsked(id); };
     }
     nsMenu_.popupAt(nsLista, e.x, e.y);
+}
+
+// Läser om alla linberäkningar och Dokumentationens uppgifter, löser upp varje beräkning mot
+// dem och räknar den. Kopplade beräkningar får alltså alltid Dokumentationens aktuella värden.
+// Raderna i Dokumentation och listan i fliken Linberäkning uppdateras efteråt.
+void MainWindow::refreshLineCalcs()
+{
+    lineCalcs_.clear();
+    lcResolved_.clear();
+    lcCalcs_.clear();
+
+    auto calcs = kalkyl::projectdb::lineCalcs(*project_);
+    if (!calcs) {
+        gfx::log("Linberäkningarna kunde inte läsas: %s", calcs.error().detail.c_str());
+        glaze::messageBox(*this, "Linberäkningarna kunde inte läsas." + kNl + calcs.error().message, "Kalkyl",
+                          glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Error);
+    } else {
+        kalkyl::projectdb::DocLineSources sources;
+        auto docs = kalkyl::projectdb::docLineSources(*project_);
+        if (docs) {
+            sources = std::move(docs.value());
+        } else {
+            gfx::log("Dokumentationens uppgifter kunde inte läsas: %s", docs.error().detail.c_str());
+            glaze::messageBox(*this, "Dokumentationens uppgifter kunde inte läsas." + kNl + docs.error().message,
+                              "Kalkyl", glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Error);
+        }
+        lineCalcs_ = std::move(calcs.value());
+        for (const auto& lc : lineCalcs_) {
+            lcResolved_.push_back(kalkyl::projectdb::resolveLineInput(lc.input, lc.docSource, sources));
+            lcCalcs_.push_back(kalkyl::projectdb::calculateResolved(lcResolved_.back()));
+        }
+    }
+    showLineCalcRows();
+    fillLineCalcList();
+}
+
+// Värde-cellen på linberäkningsraderna. Kopplad beräkning med resultat: stakningsmallen i en låst
+// cell med Σ-bild (varningsbild när utnyttjandegraden är för hög). Utan resultat: tom cell och
+// orsaken som tooltip. Ingen koppling: det manuella värdet, eller "-".
+void MainWindow::showLineCalcRows()
+{
+    for (std::size_t r = 0; r < byggPmShown_.size(); ++r) {
+        const std::size_t def = byggPmShown_[r];
+        const ByggPmRowDef& d = kByggPmRows[def];
+        if (!d.lc)
+            continue;
+        const int row = static_cast<int>(r);
+        const int index = linkedLineCalcIndex(rowKey(d));
+
+        if (index < 0) {
+            byggPmGrid.setCellEditor(row, kValueColumn, numberEditor(Unit::Mall, true, readOnly()));
+            byggPmGrid.setCell(row, kValueColumn, byggPmValues_[def][0]);
+            byggPmGrid.setCellImage(row, kValueColumn, {});
+            byggPmGrid.setCellToolTip(row, kValueColumn, readOnly() ? "" : kLcRowHint);
+            continue;
+        }
+
+        const std::size_t i = static_cast<std::size_t>(index);
+        const auto& lc = lineCalcs_[i];
+        const auto& input = lcResolved_[i].input;
+        const auto& calc = lcCalcs_[i];
+        byggPmGrid.setCellEditor(row, kValueColumn, numberEditor(Unit::Mall, true, true));
+        if (calc.result) {
+            const std::string over = overCases(*calc.result);
+            std::string tip = std::string("Stakningsmall (lastfall 15, maxtemperatur) ur en ") +
+                              (lc.docSource.empty() ? "manuell linberäkning: " : "linberäkning med indata ur Dokumentation: ") +
+                              conductorText(input) + ", aₙ " + spanText(input) + " m, σ₀ " + tensionText(input) +
+                              " MPa. Högerklicka för att ändra.";
+            if (!over.empty())
+                tip += " Utnyttjandegraden är över " + shortNumber(input.constants.maxUtilizationPercent) +
+                       " % i lastfall " + over + ".";
+            byggPmGrid.setCell(row, kValueColumn, mallText(calc));
+            byggPmGrid.setCellImage(row, kValueColumn,
+                                    glaze::stockIcon(over.empty() ? glaze::StockIcon::Sum : glaze::StockIcon::Warning));
+            byggPmGrid.setCellToolTip(row, kValueColumn, tip);
+        } else {
+            const std::string error = firstIssueOf(calc, kalkyl::linecalc::LineIssueKind::Error);
+            byggPmGrid.setCell(row, kValueColumn, "");
+            byggPmGrid.setCellImage(row, kValueColumn, {});
+            byggPmGrid.setCellToolTip(
+                row, kValueColumn,
+                !error.empty() ? "Linberäkningen har fel: " + error
+                               : "Linberäkningen saknar indata: " +
+                                     firstIssueOf(calc, kalkyl::linecalc::LineIssueKind::Missing));
+        }
+    }
+}
+
+// Bygger listan i fliken Linberäkning: en rad per beräkning med de elva kolumnerna, gul växlande
+// radton och sorteringsnycklar för talkolumnerna. Kolumnerna visar de upplösta värdena, alltså
+// dem som räkningen använde. Den tidigare valda beräkningen väljs igen.
+void MainWindow::fillLineCalcList()
+{
+    std::optional<std::int64_t> previous;
+    const int selected = lcLista.selectedIndex();
+    if (selected >= 0 && static_cast<std::size_t>(selected) < lcListIds_.size())
+        previous = lcListIds_[static_cast<std::size_t>(selected)];
+
+    std::vector<glaze::ListView::Row> rows;
+    lcListIds_.clear();
+    for (std::size_t i = 0; i < lineCalcs_.size(); ++i) {
+        const auto& lc = lineCalcs_[i];
+        const auto& input = lcResolved_[i].input;
+        const auto& calc = lcCalcs_[i];
+        glaze::ListView::Row row;
+        row.cells = {conductorText(input),
+                     lc.docSource.empty() ? std::string("Manuell") : std::string("Dokumentation"),
+                     input.mode == kalkyl::linecalc::CalcMode::New ? std::string("Ny") : std::string("Excel"),
+                     spanText(input),
+                     tensionText(input),
+                     shortNumber(input.refTempC),
+                     shortNumber(input.minTempC) + " / " + shortNumber(input.maxTempC),
+                     hasLineError(calc) ? std::string("Fel") : mallText(calc),
+                     utilizationText(calc),
+                     shortRowsText(lc),
+                     lc.note};
+        rows.push_back(std::move(row));
+        lcListIds_.push_back(lc.id);
+    }
+    lcLista.setRows(std::move(rows));
+
+    const gfx::Color red{200, 0, 0, 255};
+    for (std::size_t i = 0; i < lineCalcs_.size(); ++i) {
+        const int row = static_cast<int>(i);
+        const auto& input = lcResolved_[i].input;
+        const auto& calc = lcCalcs_[i];
+        if (input.normalSpanM)
+            lcLista.setSortKey(row, 3, *input.normalSpanM);
+        if (input.tensionMpa)
+            lcLista.setSortKey(row, 4, *input.tensionMpa);
+        lcLista.setSortKey(row, 5, input.refTempC);
+        lcLista.setSortKey(row, 6, input.minTempC);
+        bool over = false;
+        if (calc.result) {
+            lcLista.setSortKey(row, kLcMallColumn, std::round(calc.result->stakingMall));
+            double best = 0;
+            for (const auto& c : calc.result->cases) {
+                if (c.utilizationPercent)
+                    best = std::max(best, *c.utilizationPercent);
+                over = over || c.overUtilization;
+            }
+            lcLista.setSortKey(row, kLcUtilColumn, best);
+        }
+
+        gfx::Color tone = kAmber;
+        tone.a = (i % 2 == 0) ? 64 : 52;
+        for (int col = 0; col < lcLista.columnCount(); ++col) {
+            std::optional<gfx::Color> text;
+            if ((col == kLcUtilColumn && over) || (col == kLcMallColumn && hasLineError(calc)))
+                text = red;
+            lcLista.setCellColor(row, col, tone, text);
+        }
+    }
+
+    if (previous) {
+        const auto it = std::find(lcListIds_.begin(), lcListIds_.end(), *previous);
+        if (it != lcListIds_.end())
+            lcLista.setSelectedIndex(static_cast<int>(it - lcListIds_.begin()));
+    }
+    updateLcButtons();
+}
+
+// Aktiverar knapparna efter valet och skrivskyddat läge. Ändra heter Visa… skrivskyddat. Listan
+// får en tooltip om den valda beräkningen: första upplysningen eller mallen, och raderna den visas på.
+void MainWindow::updateLcButtons()
+{
+    const int selected = lcLista.selectedIndex();
+    const bool has = selected >= 0 && static_cast<std::size_t>(selected) < lineCalcs_.size();
+    const bool write = !readOnly();
+
+    const auto set = [](glaze::Button& b, bool on) {
+        if (on)
+            b.enable();
+        else
+            b.disable();
+    };
+    set(lcNyBtn, write);
+    set(lcAndraBtn, has);
+    set(lcKopieraBtn, has && write);
+    set(lcTaBortBtn, has && write);
+    lcAndraBtn.setText(write ? "Ändra…" : "Visa…");
+
+    std::string tip;
+    if (has) {
+        const std::size_t i = static_cast<std::size_t>(selected);
+        const auto& calc = lcCalcs_[i];
+        const std::string error = firstIssueOf(calc, kalkyl::linecalc::LineIssueKind::Error);
+        const std::string missing = firstIssueOf(calc, kalkyl::linecalc::LineIssueKind::Missing);
+        const std::string warning = firstIssueOf(calc, kalkyl::linecalc::LineIssueKind::Warning);
+        if (!error.empty()) {
+            tip = "Linberäkningen har fel: " + error;
+        } else if (!missing.empty()) {
+            tip = "Linberäkningen saknar indata: " + missing;
+        } else if (calc.result) {
+            tip = "Stakningsmall " + mallText(calc) + " · Högsta utnyttjandegrad " + utilizationText(calc);
+            if (!warning.empty())
+                tip += kNl + warning;
+        }
+        tip += kNl;
+        std::string rows;
+        for (const auto& d : kByggPmRows) {
+            if (!d.lc)
+                continue;
+            const std::string key = rowKey(d);
+            const auto& keys = lineCalcs_[i].docKeys;
+            if (std::find(keys.begin(), keys.end(), key) == keys.end())
+                continue;
+            rows += kNl + fullDocLabel(key);
+        }
+        tip += rows.empty() ? std::string("Visas inte i Dokumentation.") : "Visas i Dokumentation på" + rows;
+    }
+    lcLista.setToolTip(tip);
+}
+
+// Öppnar formuläret modalt. rowKey kopplar en ny beräkning till en rad i Dokumentation när
+// användaren trycker OK. Läser om allt efteråt och väljer en ny sparad beräkning i listan.
+void MainWindow::openLineCalcDialog(LcOpen mode, std::int64_t id, const std::string& rowKey)
+{
+    commitEdits();
+    LineCalcDialog dlg;
+    dlg.setProject(*project_);
+    dlg.setSystemDb(*sys_);
+    switch (mode) {
+    case LcOpen::New:             dlg.setNew("", false); break;
+    case LcOpen::NewManualForRow: dlg.setNew(rowKey, false); break;
+    case LcOpen::Existing:        dlg.setExisting(id); break;
+    case LcOpen::Copy:            dlg.setCopyOf(id); break;
+    }
+    dlg.setDocRowLabels(lineCalcRowLabels());
+    dlg.setReadOnly(readOnly());
+    dlg.run(*this);
+    const auto saved = dlg.savedId();
+
+    reloadAfterChange();
+    if (saved) {
+        const auto it = std::find(lcListIds_.begin(), lcListIds_.end(), *saved);
+        if (it != lcListIds_.end()) {
+            const int row = static_cast<int>(it - lcListIds_.begin());
+            lcLista.setSelectedIndex(row);
+            lcLista.ensureVisible(row);
+            updateLcButtons();
+        }
+    }
+}
+
+// Skapar en kopplad linberäkning för raden rowKey: förvalen för en ny beräkning, och linan, aₙ,
+// σ₀ och temperaturerna ur Dokumentation. Raden visar mallen direkt, eller "-" med orsaken när
+// något saknas i Dokumentation. Beräkningen väljs i fliken Linberäkning.
+void MainWindow::addLinkedLineCalc(const std::string& rowKey)
+{
+    commitEdits();
+    kalkyl::projectdb::LineCalc lc;
+    lc.input = kalkyl::linecalc::newLineInput();
+    lc.docSource = rowKey;
+    const auto saved = kalkyl::projectdb::saveLineCalc(*project_, lc, rowKey);
+    if (!saved) {
+        gfx::log("Linberäkningen kunde inte sparas: %s", saved.error().detail.c_str());
+        glaze::messageBox(*this, saved.error().message, "Kalkyl", glaze::MessageBoxButtons::OK,
+                          glaze::MessageBoxType::Error);
+        return;
+    }
+    reloadAfterChange();
+    const auto it = std::find(lcListIds_.begin(), lcListIds_.end(), saved.value());
+    if (it != lcListIds_.end()) {
+        lcLista.setSelectedIndex(static_cast<int>(it - lcListIds_.begin()));
+        updateLcButtons();
+    }
+}
+
+// Frågar Ja/Nej och tar bort beräkningen. Frågan säger vilka rader i Dokumentation som visar den
+// och att de visar - efteråt.
+void MainWindow::removeLineCalcAsked(std::int64_t id)
+{
+    std::size_t index = lineCalcs_.size();
+    for (std::size_t i = 0; i < lineCalcs_.size(); ++i)
+        if (lineCalcs_[i].id == id)
+            index = i;
+    if (index == lineCalcs_.size())
+        return;
+    const auto& lc = lineCalcs_[index];
+    const auto& calc = lcCalcs_[index];
+
+    std::string text = "Ta bort linberäkningen " + conductorText(lcResolved_[index].input) + " (" +
+                       (lc.docSource.empty() ? "Manuell" : "Indata ur Dokumentation") + ", ";
+    if (calc.result)
+        text += "Mall " + mallText(calc);
+    else
+        text += hasLineError(calc) ? "beräkningen har fel" : "beräkningen saknar indata";
+    text += ") ur projektet?" + kNl + kNl;
+
+    std::vector<std::string> rows;
+    for (const auto& d : kByggPmRows) {
+        if (!d.lc)
+            continue;
+        const std::string key = rowKey(d);
+        if (std::find(lc.docKeys.begin(), lc.docKeys.end(), key) != lc.docKeys.end())
+            rows.push_back(fullDocLabel(key));
+    }
+    if (rows.empty()) {
+        text += "Den visas inte i Dokumentation.";
+    } else if (rows.size() == 1) {
+        text += "Den visas på raden " + rows[0] + ", som visar - efteråt.";
+    } else {
+        text += "Den visas på " + std::to_string(rows.size()) + " rader i Dokumentation, som visar - efteråt:";
+        for (const auto& r : rows)
+            text += kNl + r;
+    }
+
+    if (glaze::messageBox(*this, text, "Ta bort beräkning", glaze::MessageBoxButtons::YesNo,
+                          glaze::MessageBoxType::Warning) != glaze::DialogResult::Yes)
+        return;
+    auto done = kalkyl::projectdb::removeLineCalc(*project_, id);
+    if (!done)
+        glaze::messageBox(*this, done.error().message, "Kalkyl", glaze::MessageBoxButtons::OK,
+                          glaze::MessageBoxType::Error);
+    reloadAfterChange();
+}
+
+// Ny beräkning…: en lös, manuell beräkning. Den kopplas till en rad i Dokumentation med högerklick där.
+void MainWindow::lcNyBtnClicked(glaze::Widget*, glaze::ClickArgs&)
+{
+    openLineCalcDialog(LcOpen::New, 0, "");
+}
+
+// Ändra… (Visa…): den valda beräkningen.
+void MainWindow::lcAndraBtnClicked(glaze::Widget*, glaze::ClickArgs&)
+{
+    const int selected = lcLista.selectedIndex();
+    if (selected >= 0 && static_cast<std::size_t>(selected) < lcListIds_.size())
+        openLineCalcDialog(LcOpen::Existing, lcListIds_[static_cast<std::size_t>(selected)], "");
+}
+
+// Kopiera…: en ny, lös och manuell beräkning med samma värden som den valda.
+void MainWindow::lcKopieraBtnClicked(glaze::Widget*, glaze::ClickArgs&)
+{
+    const int selected = lcLista.selectedIndex();
+    if (selected >= 0 && static_cast<std::size_t>(selected) < lcListIds_.size())
+        openLineCalcDialog(LcOpen::Copy, lcListIds_[static_cast<std::size_t>(selected)], "");
+}
+
+// Ta bort: frågan och borttagningen görs av removeLineCalcAsked.
+void MainWindow::lcTaBortBtnClicked(glaze::Widget*, glaze::ClickArgs&)
+{
+    const int selected = lcLista.selectedIndex();
+    if (selected >= 0 && static_cast<std::size_t>(selected) < lcListIds_.size())
+        removeLineCalcAsked(lcListIds_[static_cast<std::size_t>(selected)]);
+}
+
+// Dubbelklick och Enter i listan öppnar den valda beräkningen.
+void MainWindow::lcListaActivated(glaze::Widget*, glaze::ActivateArgs&)
+{
+    const int current = lcLista.currentRow();
+    if (current >= 0 && static_cast<std::size_t>(current) < lcListIds_.size())
+        openLineCalcDialog(LcOpen::Existing, lcListIds_[static_cast<std::size_t>(current)], "");
+}
+
+// Valet i listan ändrades: knapparna och tooltipen följer det.
+void MainWindow::lcListaChanged(glaze::Widget*, glaze::ChangeArgs&)
+{
+    updateLcButtons();
+}
+
+// Högerklick i listan. Högertrycket har redan valt raden, så den ges av contextRow().
+// Skrivskyddat finns bara Visa…. Det finns ingen kopplingspost här.
+void MainWindow::lcListaContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e)
+{
+    const int row = lcLista.contextRow();
+    if (row < 0 || static_cast<std::size_t>(row) >= lcListIds_.size())
+        return;
+    const std::int64_t id = lcListIds_[static_cast<std::size_t>(row)];
+    lcMenu_.items.clear();
+    if (readOnly()) {
+        lcMenu_.addItem("Visa…").onClick = [this, id] { openLineCalcDialog(LcOpen::Existing, id, ""); };
+    } else {
+        lcMenu_.addItem("Ändra…").onClick = [this, id] { openLineCalcDialog(LcOpen::Existing, id, ""); };
+        lcMenu_.addItem("Kopiera…").onClick = [this, id] { openLineCalcDialog(LcOpen::Copy, id, ""); };
+        lcMenu_.addSeparator();
+        lcMenu_.addItem("Ta bort…").onClick = [this, id] { removeLineCalcAsked(id); };
+    }
+    lcMenu_.popupAt(lcLista, e.x, e.y);
 }
 
 // Arkiv > Spara (Ctrl+S). Gör inget skrivskyddat. En pågående sparning och ett oförändrat

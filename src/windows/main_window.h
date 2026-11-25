@@ -10,8 +10,9 @@
 #include <utility>
 #include <vector>
 
-#include "calc/normal_span.h"
+#include "anCalc/normal_span.h"
 #include "conductor/conductor.h"
+#include "lineCalc/line_calc.h"
 #include "projectdb/project_data.h"
 #include "projectdb/project_db.h"
 #include "systemdb/system_db.h"
@@ -33,6 +34,7 @@ private:
     glaze::TabPage byggPmSida;
     glaze::TabPage stolpSida;
     glaze::TabPage nsSida;
+    glaze::TabPage lcSida;
     glaze::Panel byggPmPanel;
     glaze::Label byggPmRubrik;
     glaze::Label byggPmBla;
@@ -47,12 +49,19 @@ private:
     glaze::Label stolpRubrik;
     glaze::DataGrid stolpGrid;
     glaze::Panel nsPanel;
+    glaze::Panel lcPanel;
     glaze::Label nsRubrik;
     glaze::Button nsNyBtn;
     glaze::Button nsAndraBtn;
     glaze::Button nsKopieraBtn;
     glaze::Button nsTaBortBtn;
     glaze::ListView nsLista;
+    glaze::Label lcRubrik;
+    glaze::Button lcNyBtn;
+    glaze::Button lcAndraBtn;
+    glaze::Button lcKopieraBtn;
+    glaze::Button lcTaBortBtn;
+    glaze::ListView lcLista;
     void initializeComponent();
 #pragma endregion
 
@@ -76,6 +85,10 @@ private:
 
     // Hur formuläret Normalspannsberäkning öppnas: en ny beräkning, en befintlig eller en kopia.
     enum class NsOpen { New, Existing, Copy };
+
+    // Hur formuläret Linberäkning öppnas: en ny lös manuell beräkning, en ny manuell för en rad,
+    // en befintlig eller en kopia. En kopplad beräkning skapas utan formulär (addLinkedLineCalc).
+    enum class LcOpen { New, NewManualForRow, Existing, Copy };
 
     // Startlogik: utseende, titel med projektnamn, projektets uppgifter, menyernas handlers,
     // listorna och den automatiska sparningen.
@@ -122,7 +135,8 @@ private:
     void byggPmGridCommitted(glaze::Widget* sender, glaze::CellChangeArgs& e);
 
     // Högerklick i Dokumentation: meny för linraderna (uppdatera från linregistret) och för de
-    // sex normalspannsraderna (lägg till, koppla, ändra, ta bort). Tom meny ger ingen meny.
+    // sex normalspannsraderna och de sex linberäkningsraderna (lägg till, koppla, ändra, ta bort).
+    // Tom meny ger ingen meny.
     void byggPmGridContextMenu(glaze::Widget* sender, glaze::ContextMenuArgs& e);
 
     // Ny beräkning…: öppnar formuläret för en lös beräkning, utan koppling till en rad i
@@ -150,9 +164,38 @@ private:
     // Högerklick i listan: Ändra (eller Visa), Kopiera och Ta bort för raden under pekaren.
     void nsListaContextMenu(glaze::Widget* sender, glaze::ContextMenuArgs& e);
 
+    // Ny beräkning…: öppnar formuläret Linberäkning för en lös, manuell beräkning. Kopplingar till
+    // en rad görs bara i Dokumentations högerklicksmeny.
+    void lcNyBtnClicked(glaze::Widget* sender, glaze::ClickArgs& e);
+
+    // Ändra… (Visa… skrivskyddat): öppnar den valda linberäkningen i formuläret.
+    // Gör ingenting utan vald rad.
+    void lcAndraBtnClicked(glaze::Widget* sender, glaze::ClickArgs& e);
+
+    // Kopiera…: öppnar formuläret med en kopia av den valda beräkningen, som en ny lös och manuell
+    // beräkning. Originalet och dess kopplingar rörs inte.
+    void lcKopieraBtnClicked(glaze::Widget* sender, glaze::ClickArgs& e);
+
+    // Ta bort: frågar och tar sedan bort den valda linberäkningen med alla dess kopplingar.
+    void lcTaBortBtnClicked(glaze::Widget* sender, glaze::ClickArgs& e);
+
+    // Dubbelklick eller Enter i listan: öppnar den valda linberäkningen.
+    void lcListaActivated(glaze::Widget* sender, glaze::ActivateArgs& e);
+
+    // Valet i listan ändrades: knapparna aktiveras bara när en rad är vald.
+    void lcListaChanged(glaze::Widget* sender, glaze::ChangeArgs& e);
+
+    // Högerklick i listan: Ändra (eller Visa), Kopiera och Ta bort för raden under pekaren.
+    void lcListaContextMenu(glaze::Widget* sender, glaze::ContextMenuArgs& e);
+
     // Läser projektets uppgifter: Dokumentationens värden och referenser (med förval för det som
     // saknas) och projektets linkopior. Ett fel ger en meddelanderuta och förvalen.
     void loadProjectData();
+
+    // Ett nytt projekt får Dokumentationens förval (kNewProjectDefaults) skrivna i projektet:
+    // linor ur linregistret, konfiguration, uppspänningar och temperaturer. Ett förval som inte
+    // går att skriva loggas och hoppas över. Befintliga projekt får aldrig förvalen.
+    void applyNewProjectDefaults();
 
     // Sparar den ändrade cellen för raden def i kByggPmRows (kolumn 1 eller 2) i projektet.
     // Svarar om det lyckades. Vid fel visas en meddelanderuta och cellen återställs.
@@ -190,6 +233,34 @@ private:
     // Dokumentation som visar den.
     void removeNormalSpanAsked(std::int64_t id);
 
+    // Läser om alla linberäkningar och Dokumentationens uppgifter, löser upp och räknar varje
+    // beräkning och uppdaterar raderna i Dokumentation och listan i fliken Linberäkning.
+    void refreshLineCalcs();
+
+    // Värde-cellen på de sex linberäkningsraderna: stakningsmallen med Σ-bild när en beräkning är
+    // kopplad, annars det manuella värdet eller "-". Tooltipen säger vad som gäller.
+    void showLineCalcRows();
+
+    // Bygger raderna i listan i fliken Linberäkning ur lineCalcs_, lcResolved_ och lcCalcs_, med gul
+    // växlande radton. Den tidigare valda beräkningen väljs igen.
+    void fillLineCalcList();
+
+    // Aktiverar knapparna i fliken Linberäkning efter valet och skrivskyddat läge, och ger listan
+    // en tooltip om den valda beräkningen (första upplysningen eller mallen, och var den visas).
+    void updateLcButtons();
+
+    // Öppnar formuläret Linberäkning modalt. rowKey kopplar en ny beräkning till en rad i
+    // Dokumentation när användaren trycker OK. Läser om allt efteråt.
+    void openLineCalcDialog(LcOpen mode, std::int64_t id, const std::string& rowKey);
+
+    // Lägg till på en linberäkningsrad: skapar en kopplad beräkning med förvalen och indata ur
+    // Dokumentation, utan formulär, så att raden visar mallen direkt. Ändra… öppnar den.
+    void addLinkedLineCalc(const std::string& rowKey);
+
+    // Frågar Ja/Nej och tar bort linberäkningen med alla dess kopplingar. Frågan listar raderna i
+    // Dokumentation som visar den.
+    void removeLineCalcAsked(std::int64_t id);
+
     // Efter en ändring i projektet: läser om uppgifterna och beräkningarna, uppdaterar
     // rullistorna och titeln. Fel visas av funktionerna som anropas.
     void reloadAfterChange();
@@ -201,7 +272,7 @@ private:
     // Radens korta namn i listan, t.ex. "Fas före" eller "Topp h. efter (dold)".
     std::string shortDocLabel(const std::string& key) const;
 
-    // Radens hela text i Dokumentation, t.ex. "Normalspannsberäkning faslina före ombyggnation".
+    // Radens hela text i Dokumentation, t.ex. "Faslina normalspannsberäkning före ombyggnad".
     std::string fullDocLabel(const std::string& key) const;
 
     // De rader som visar beräkningen, med korta namn skilda med komma och i radordning.
@@ -210,6 +281,20 @@ private:
 
     // Platsen i normalSpans_ för beräkningen som raden key visar, eller -1.
     int linkedSpanIndex(const std::string& key) const;
+
+    // Nyckel och radtext för de sex linberäkningsraderna, till formuläret. Texten följer läget.
+    std::vector<std::pair<std::string, std::string>> lineCalcRowLabels() const;
+
+    // De rader som visar linberäkningen, med korta namn skilda med komma och i radordning.
+    // Utan rader blir svaret "–".
+    std::string shortRowsText(const kalkyl::projectdb::LineCalc& lc) const;
+
+    // Platsen i lineCalcs_ för beräkningen som linberäkningsraden key visar, eller -1.
+    int linkedLineCalcIndex(const std::string& key) const;
+
+    // Texten i undermenyn Koppla befintlig för beräkningen på plats index i lineCalcs_:
+    // lina, aₙ, σ₀, mall och raderna den visas på.
+    std::string lineCalcSummary(std::size_t index) const;
 
     // Startar publiceringen: bilden tas på UI-tråden och publiceras i en Worker. Utfallet tas
     // emot på UI-tråden och visas efter kind.
@@ -242,10 +327,15 @@ private:
     std::vector<std::size_t> byggPmShown_;                           // synlig rad -> plats i kByggPmRows
     bool byggPmSplit_ = false;                                       // topplina höger är en egen lina
     std::vector<kalkyl::projectdb::NormalSpan> normalSpans_;         // beräkningarna i projektet
-    std::vector<kalkyl::calc::SpanCalculation> nsCalcs_;             // resultat per beräkning, samma ordning
+    std::vector<kalkyl::ancalc::SpanCalculation> nsCalcs_;             // resultat per beräkning, samma ordning
     std::vector<std::int64_t> nsListIds_;                            // beräkningens id per rad i listan
     glaze::Menu byggPmMenu_;                                         // snabbmenyn i Dokumentation
     glaze::Menu nsMenu_;                                             // snabbmenyn i listan
+    std::vector<kalkyl::projectdb::LineCalc> lineCalcs_;             // linberäkningarna i projektet
+    std::vector<kalkyl::projectdb::ResolvedLineInput> lcResolved_;   // upplösta indata, samma ordning
+    std::vector<kalkyl::linecalc::LineCalculation> lcCalcs_;         // resultat per beräkning, samma ordning
+    std::vector<std::int64_t> lcListIds_;                            // linberäkningens id per rad i listan
+    glaze::Menu lcMenu_;                                             // snabbmenyn i listan Linberäkning
     bool saving_ = false;                                            // en publicering pågår
     bool closeAfterSave_ = false;                                    // stäng fönstret när sparningen är klar
     bool closingConfirmed_ = false;                                  // stängningen är bekräftad, ingen fråga

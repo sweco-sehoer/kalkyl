@@ -1,0 +1,266 @@
+// GENERERAD av GlazeBuilder — redigera i GlazeBuilder, inte här.
+// glazeui-design: ui=Slate theme=slate(Windows) style=0 lang=sv
+#include "line_calc_dialog.h"
+
+LineCalcDialog::LineCalcDialog() { initializeComponent(); }
+
+void LineCalcDialog::initializeComponent()
+{
+    setTitle("Linberäkning");
+    setContentSize(1480, 940);
+    setMinimumContentSize(1000, 600);
+    setStartPosition(glaze::StartPosition::CenterOwner);
+    setModal(true);
+    setAcceptButton(okBtn);
+    setCancelButton(cancelBtn);
+
+    statusBar.show();
+    statusBar.addPanel("", 0, true);
+
+    cancelBtn.name = "cancelBtn";
+    cancelBtn.setText("Avbryt");
+    cancelBtn.setDialogResult(glaze::DialogResult::Cancel);
+    cancelBtn.width = 96;
+    cancelBtn.anchors = {false, false, true, true};
+    cancelBtn.right = 16;
+    cancelBtn.bottom = 16;
+
+    okBtn.name = "okBtn";
+    okBtn.setText("OK");
+    okBtn.setToolTip("Sparar linberäkningen i projektet och stänger");
+    okBtn.width = 96;
+    okBtn.anchors = {false, false, true, true};
+    okBtn.anchorRight = {"cancelBtn", 8};
+    okBtn.bottom = 16;
+
+    noteLbl.name = "noteLbl";
+    noteLbl.setText("Anteckning");
+    noteLbl.x = 16;
+    noteLbl.y = 16;
+
+    noteTxt.name = "noteTxt";
+    noteTxt.anchors = {true, true, true, false};
+    noteTxt.anchorLeft = {"noteLbl", 8};
+    noteTxt.y = 12;
+    noteTxt.right = 16;
+
+    docLbl.name = "docLbl";
+    docLbl.setRole(glaze::Label::Role::Dim);
+    docLbl.x = 16;
+    docLbl.anchorTop = {"noteTxt", 8};
+    docLbl.anchors = {true, true, true, false};
+    docLbl.right = 16;
+
+    sheetPanel.name = "sheetPanel";
+    sheetPanel.x = 0;
+    sheetPanel.anchorTop = {"docLbl", 8};
+    sheetPanel.anchors = {true, true, true, true};
+    sheetPanel.right = 0;
+    sheetPanel.anchorBottom = {"cancelBtn", 12};
+
+    conductorLbl.name = "conductorLbl";
+    conductorLbl.setText("Lina");
+    conductorLbl.x = 16;
+    conductorLbl.y = 8;
+
+    conductorDd.name = "conductorDd";
+    conductorDd.width = 480;
+    conductorDd.anchorLeft = {"conductorLbl", 8};
+    conductorDd.y = 4;
+
+    conductorInfo.name = "conductorInfo";
+    conductorInfo.setRole(glaze::Label::Role::Dim);
+    conductorInfo.anchorLeft = {"conductorDd", 12};
+    conductorInfo.y = 8;
+
+    inputGrid.name = "inputGrid";
+    inputGrid.x = 16;
+    inputGrid.width = 844;
+    inputGrid.anchorTop = {"conductorDd", 8};
+    inputGrid.setSortable(false);
+    inputGrid.setEditOnClick(false);
+    inputGrid.setColumns({{.text = "Indata", .width = 330}, {.text = "", .width = 90, .align = glaze::Align::Right}, {.text = "", .width = 330}, {.text = "", .width = 90, .align = glaze::Align::Right}});
+    inputGrid.setColumnEditor(0, {glaze::DataGrid::Editor::None});
+    inputGrid.setColumnEditor(1, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    inputGrid.setColumnEditor(2, {glaze::DataGrid::Editor::None});
+    inputGrid.setColumnEditor(3, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+
+    constGrid.name = "constGrid";
+    constGrid.x = 16;
+    constGrid.width = 844;
+    constGrid.anchorTop = {"inputGrid", 12};
+    constGrid.setSortable(false);
+    constGrid.setEditOnClick(false);
+    constGrid.setColumns({{.text = "Lindata / Konstanter", .width = 330}, {.text = "", .width = 90, .align = glaze::Align::Right}, {.text = "", .width = 330}, {.text = "", .width = 90, .align = glaze::Align::Right}});
+    constGrid.setColumnEditor(0, {glaze::DataGrid::Editor::None});
+    constGrid.setColumnEditor(1, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    constGrid.setColumnEditor(2, {glaze::DataGrid::Editor::None});
+    constGrid.setColumnEditor(3, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+
+    crossingGrp.name = "crossingGrp";
+    crossingGrp.setText("Läs in korsningslastfall enligt Table 5.9.6/SE.1 (50341-2-18)");
+    crossingGrp.width = 420;
+    crossingGrp.anchorLeft = {"inputGrid", 32};
+    crossingGrp.anchorTop = {"conductorDd", 8};
+
+    upperBtn.name = "upperBtn";
+    upperBtn.setText("Övre linan");
+    upperBtn.setToolTip("Läser in lastfallen för övre linan i en korsning");
+    upperBtn.width = 160;
+    upperBtn.x = 0;
+    upperBtn.y = 0;
+
+    lowerBtn.name = "lowerBtn";
+    lowerBtn.setText("Nedre linan");
+    lowerBtn.setToolTip("Läser in lastfallen för nedre linan i en korsning");
+    lowerBtn.width = 160;
+    lowerBtn.anchorLeft = {"upperBtn", 16};
+    lowerBtn.y = 0;
+
+    resetBtn.name = "resetBtn";
+    resetBtn.setText("Återställ indata enl. SS-EN 50341-2-18");
+    resetBtn.setToolTip("Sätter standardlastfallen, vindtrycken och temperaturerna enligt standarden");
+    resetBtn.anchorLeft = {"inputGrid", 32};
+    resetBtn.anchorTop = {"crossingGrp", 12};
+
+    modeGrp.name = "modeGrp";
+    modeGrp.setText("Läge");
+    modeGrp.width = 420;
+    modeGrp.anchorLeft = {"inputGrid", 32};
+    modeGrp.anchorTop = {"resetBtn", 16};
+
+    modeNewRb.name = "modeNewRb";
+    modeNewRb.setText("Ny (felen i arket rättade)");
+    modeNewRb.setGroup("mode");
+    modeNewRb.setChecked(true);
+    modeNewRb.x = 0;
+    modeNewRb.y = 0;
+
+    modeInfoBtn.name = "modeInfoBtn";
+    modeInfoBtn.setImg(glaze::stockIcon(glaze::StockIcon::Information));
+    modeInfoBtn.setToolTip("Felen i Excel-arket och hur läget Ny rättar dem");
+    modeInfoBtn.anchorLeft = {"modeNewRb", 8};
+    modeInfoBtn.y = 0;
+
+    modeExcelRb.name = "modeExcelRb";
+    modeExcelRb.setText("Excel (räknar exakt som arket)");
+    modeExcelRb.setGroup("mode");
+    modeExcelRb.x = 0;
+    modeExcelRb.anchorTop = {"modeInfoBtn", 4};
+
+    diffChk.name = "diffChk";
+    diffChk.setText("Markera skillnaden mot läget Excel");
+    diffChk.setToolTip("Räknar båda lägena och färgar de celler som visar olika värden");
+    diffChk.x = 0;
+    diffChk.anchorTop = {"modeExcelRb", 8};
+
+    docInputChk.name = "docInputChk";
+    docInputChk.setText("Hämta lina, aₙ, σ₀ och temperaturer ur Dokumentation");
+    docInputChk.setToolTip("Kopplad beräkning, värdena hämtas ur Dokumentation varje gång och kan bara ändras där");
+    docInputChk.anchorLeft = {"inputGrid", 32};
+    docInputChk.anchorTop = {"modeGrp", 12};
+
+    infoLbl.name = "infoLbl";
+    infoLbl.setText("Allt räknas om när ett värde ändras. Klistra in från Excel med Ctrl+V i den cell där inklistringen ska börja. Resultatkolumnerna går inte att ändra, utom islast och vindlast, där ett tal gör lastfallet manuellt.");
+    infoLbl.setRole(glaze::Label::Role::Dim);
+    infoLbl.setWrap(true);
+    infoLbl.width = 420;
+    infoLbl.anchorLeft = {"inputGrid", 32};
+    infoLbl.anchorTop = {"docInputChk", 12};
+
+    caseGrid.name = "caseGrid";
+    caseGrid.x = 16;
+    caseGrid.anchorTop = {"constGrid", 16};
+    caseGrid.anchors = {true, true, true, false};
+    caseGrid.right = 16;
+    caseGrid.setRowHeaders(true);
+    caseGrid.setHeaderLines(7);
+    caseGrid.setHeaderVAlign(glaze::VAlign::Bottom);
+    caseGrid.setSortable(false);
+    caseGrid.setEditOnClick(false);
+    caseGrid.setColumns({{.text = "Lastfall\n\n\n\n\n\nID", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Temp\nT\n(°C)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Lastfall benämning", .width = 170}, {.text = "Stadium", .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "SS-EN 50341\nStandard\nload cases", .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "SS-EN 50341\nLoad cases\nfor calculation\nof clearances", .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Vid is och\nvindstilla\nanvänd vind-\nparametrar från\nlastfall-ID", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Höjd\nh\n(m)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Magnitud\nvindlast\n(%)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Karakter-\nistiska\nvindtrycket\nqh\n(N/m²)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Referens-\nhöjd\nhref\n(m)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "dqh\n(N/m³)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Vindtryck\nqh\n(N/m²)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Istjocklek\nvid\nnormal\nvind\n(mm)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Motsvar-\nande\nistjocklek\nvid\nvindstilla\n(mm)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Resultat\n\n\n\nIslast\nI\n(N/m)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Vindlast\nQwc\n(N/m)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Nedhäng\nvertikal\nprojektion\nb\n(m)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Spänning\nσ\n(MPa)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Linkraft\nF\n(N)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Mall\n(nr)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Utnyttjan-\ndegrad\nav\nbrottlast\n(%)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "", .width = 12}, {.text = "Data till SAG (3D)\n \n \n \nNedhäng\nb\n(m)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Utsvängnings-\nvinkel\nα\n(°)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}, {.text = "Mall\n(nr)", .align = glaze::Align::Right, .headerAlign = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin}});
+    caseGrid.setColumnEditor(1, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    caseGrid.setColumnEditor(2, {glaze::DataGrid::Editor::Text});
+    caseGrid.setColumnEditor(3, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(4, {glaze::DataGrid::Editor::Text});
+    caseGrid.setColumnEditor(5, {glaze::DataGrid::Editor::Text});
+    caseGrid.setColumnEditor(6, {.editor = glaze::DataGrid::Editor::Number, .decimals = 0, .allowEmpty = true});
+    caseGrid.setColumnEditor(7, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(8, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    caseGrid.setColumnEditor(9, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    caseGrid.setColumnEditor(10, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    caseGrid.setColumnEditor(11, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    caseGrid.setColumnEditor(12, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(13, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    caseGrid.setColumnEditor(14, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(15, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    caseGrid.setColumnEditor(16, {.editor = glaze::DataGrid::Editor::Number, .allowEmpty = true});
+    caseGrid.setColumnEditor(17, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(18, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(19, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(20, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(21, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(22, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(23, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(24, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnEditor(25, {glaze::DataGrid::Editor::None});
+    caseGrid.setColumnToolTip(1, "Temperatur i lastfallet");
+    caseGrid.setColumnToolTip(3, "Stadium, Ei före transponeringen och Ep efter den");
+    caseGrid.setColumnToolTip(6, "Vid is och vindstilla används vindparametrarna från lastfall-ID");
+    caseGrid.setColumnToolTip(9, "Karakteristiska vindtrycket qh");
+    caseGrid.setColumnToolTip(15, "Ett tal här gör lastfallet manuellt (arkets kolumn B). Högerklicka och välj Räkna last ur vind och is för att ta bort det.");
+    caseGrid.setColumnToolTip(16, "Ett tal här gör lastfallet manuellt (arkets kolumn B). Högerklicka och välj Räkna last ur vind och is för att ta bort det.");
+    caseGrid.setColumnToolTip(20, "Mall");
+    caseGrid.setColumnToolTip(21, "Utnyttjandegrad av brottlast");
+    caseGrid.setColumnToolTip(23, "Data till SAG (3D), nedhänget b i det lutande spannet");
+
+    okBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { okBtnClicked(s, e); };
+    upperBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { upperBtnClicked(s, e); };
+    lowerBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { lowerBtnClicked(s, e); };
+    resetBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { resetBtnClicked(s, e); };
+    noteTxt.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { noteChanged(s, e); };
+    conductorDd.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { conductorChanged(s, e); };
+    modeNewRb.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { modeChanged(s, e); };
+    modeInfoBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { modeInfoBtnClicked(s, e); };
+    modeExcelRb.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { modeChanged(s, e); };
+    diffChk.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { diffChanged(s, e); };
+    docInputChk.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { docInputChanged(s, e); };
+    inputGrid.onCommit = [this](glaze::Widget* s, glaze::CellChangeArgs& e) { inputGridCommitted(s, e); };
+    inputGrid.onKeyDown = [this](glaze::Widget* s, glaze::KeyArgs& e) { inputGridKeyDown(s, e); };
+    inputGrid.onMouseUp = [this](glaze::Widget* s, glaze::MouseArgs& e) { inputGridMouseUp(s, e); };
+    inputGrid.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { inputGridContextMenu(s, e); };
+    constGrid.onCommit = [this](glaze::Widget* s, glaze::CellChangeArgs& e) { constGridCommitted(s, e); };
+    constGrid.onKeyDown = [this](glaze::Widget* s, glaze::KeyArgs& e) { constGridKeyDown(s, e); };
+    constGrid.onMouseUp = [this](glaze::Widget* s, glaze::MouseArgs& e) { constGridMouseUp(s, e); };
+    constGrid.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { constGridContextMenu(s, e); };
+    caseGrid.onCommit = [this](glaze::Widget* s, glaze::CellChangeArgs& e) { caseGridCommitted(s, e); };
+    caseGrid.onKeyDown = [this](glaze::Widget* s, glaze::KeyArgs& e) { caseGridKeyDown(s, e); };
+    caseGrid.onMouseUp = [this](glaze::Widget* s, glaze::MouseArgs& e) { caseGridMouseUp(s, e); };
+    caseGrid.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { caseGridContextMenu(s, e); };
+    glaze::AppWindow::onLoad = [this](glaze::Widget* s, glaze::EventArgs& e) { onLoad(s, e); };
+    glaze::AppWindow::onClose = [this](glaze::Widget* s, glaze::CloseArgs& e) { onClosing(s, e); };
+
+    root().adopt(cancelBtn);
+    root().adopt(okBtn);
+    root().adopt(noteLbl);
+    root().adopt(noteTxt);
+    root().adopt(docLbl);
+    root().adopt(sheetPanel);
+    sheetPanel.adopt(conductorLbl);
+    sheetPanel.adopt(conductorDd);
+    sheetPanel.adopt(conductorInfo);
+    sheetPanel.adopt(inputGrid);
+    sheetPanel.adopt(constGrid);
+    sheetPanel.adopt(crossingGrp);
+    sheetPanel.adopt(resetBtn);
+    sheetPanel.adopt(modeGrp);
+    sheetPanel.adopt(docInputChk);
+    sheetPanel.adopt(infoLbl);
+    sheetPanel.adopt(caseGrid);
+    crossingGrp.adopt(upperBtn);
+    crossingGrp.adopt(lowerBtn);
+    modeGrp.adopt(modeNewRb);
+    modeGrp.adopt(modeInfoBtn);
+    modeGrp.adopt(modeExcelRb);
+    modeGrp.adopt(diffChk);
+}

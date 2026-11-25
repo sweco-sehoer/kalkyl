@@ -2,6 +2,8 @@
 set(KALKYL_WINDOWS "")
 glaze_add_window(KALKYL_WINDOWS
     windows/conductor_dialog
+    windows/line_calc_dialog
+    windows/line_calc_info_dialog
     windows/main_window
     windows/normal_span_dialog
     windows/project_picker)
@@ -19,11 +21,34 @@ target_link_libraries(kalkyl PRIVATE
     kalkyl_core
     kalkyl_platform
     kalkyl_conductor
-    kalkyl_calc
+    kalkyl_ancalc
+    kalkyl_linecalc
+    kalkyl_sheetgrid
+    kalkyl_tabletext
     kalkyl_systemdb
     kalkyl_projectdb
     kalkyl_appearance
     kalkyl_warnings)
+
+# PM:et om linberäkningen och Excel-arket (res/linberakning_excel.md) byggs in som en
+# strängkonstant i generated/res/linberakning_excel.h, så att ingen fil behöver följa med.
+# CMake konfigureras om när filen ändras, och headern skrivs bara när innehållet ändrats.
+set(_pm "${PROJECT_SOURCE_DIR}/res/linberakning_excel.md")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_pm}")
+file(READ "${_pm}" _pmText)
+string(CONCAT _pmHeader
+    [=[// Genererad av src/CMakeLists.txt ur res/linberakning_excel.md. Ändra md-filen, inte den här.
+#pragma once
+#include <string_view>
+
+namespace kalkyl::res {
+inline constexpr std::string_view kLineCalcExcelMd = R"md(]=]
+    "${_pmText}"
+    [=[)md";
+}
+]=])
+file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/generated/res/linberakning_excel.h" CONTENT "${_pmHeader}" @ONLY)
+target_include_directories(kalkyl PRIVATE "${CMAKE_BINARY_DIR}/generated")
 
 # Programfilens ikon (windres) ur res/kalkyl.ico, framtagen en gång (res/CLAUDE.md).
 glaze_app_icon(kalkyl ICO ${PROJECT_SOURCE_DIR}/res/kalkyl.ico)

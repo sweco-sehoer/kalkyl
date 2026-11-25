@@ -5,11 +5,9 @@ via `find_library` före `find_package`, så att exe-filen inte behöver någon 
 
 | Fil | Innehåll |
 |---|---|
-| `CMakeLists.txt` | Biblioteket, SQLite och testet `db` |
+| `CMakeLists.txt` | Biblioteket och SQLite (testet `db` ligger i `tests/`) |
 | `database.h`, `database.cpp` | `Database` (RAII runt `sqlite3*`), `Statement` och `OpenOptions` |
 | `migrate.h`, `migrate.cpp` | `Schema` och `migrate`: id- och versionskontroll samt migreringssteg |
-| `db_test.cpp` | Headless-test mot en lokal mapp med åäö |
-
 - `Database::open` sätter `journal_mode=DELETE`, `synchronous=FULL`, `foreign_keys=ON`, `busy_timeout`
   och vid behov `locking_mode=EXCLUSIVE`. En anslutning får flyttas mellan trådar men aldrig användas av två samtidigt.
 - Alla fel är `core::Result` med kod enligt tabellen i `database.h`. Inga SQLite-typer syns i headern

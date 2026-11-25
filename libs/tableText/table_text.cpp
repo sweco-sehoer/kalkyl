@@ -1,11 +1,11 @@
-#include "calc/table_text.h"
+#include "tableText/table_text.h"
 
 #include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <system_error>
 
-namespace kalkyl::calc {
+namespace kalkyl::tabletext {
 
 namespace {
 
@@ -218,4 +218,4 @@ PastePlan planPaste(int anchorRow, int anchorColumn, int columnCount,
     return plan;
 }
 
-} // namespace kalkyl::calc
+} // namespace kalkyl::tabletext

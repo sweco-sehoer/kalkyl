@@ -10,12 +10,13 @@
 #include <utility>
 #include <vector>
 
-#include "calc/table_text.h"
+#include "tableText/table_text.h"
 #include "projectdb/project_data.h"
 
 namespace {
 
-namespace calc = kalkyl::calc;
+namespace ancalc = kalkyl::ancalc;
+namespace tabletext = kalkyl::tabletext;
 namespace projectdb = kalkyl::projectdb;
 
 // Tabellens kolumner: indata (Stpnr, Spannlängd, H) och kontrollerna 1-5.
@@ -64,13 +65,13 @@ std::string trim(const std::string& s)
 }
 
 // Tabellkolumnen som ett fel gäller, eller -1 när felet gäller hela beräkningen.
-int columnOf(calc::SpanColumn column)
+int columnOf(ancalc::SpanColumn column)
 {
     switch (column) {
-    case calc::SpanColumn::Pole: return kColPole;
-    case calc::SpanColumn::Length: return kColLength;
-    case calc::SpanColumn::Height: return kColHeight;
-    case calc::SpanColumn::None: break;
+    case ancalc::SpanColumn::Pole: return kColPole;
+    case ancalc::SpanColumn::Length: return kColLength;
+    case ancalc::SpanColumn::Height: return kColHeight;
+    case ancalc::SpanColumn::None: break;
     }
     return -1;
 }
@@ -78,7 +79,7 @@ int columnOf(calc::SpanColumn column)
 // Talet med decimalkomma och hårda mellanslag som tusentalsavgränsare, till resultatpanelen.
 std::string groupedText(double value, int decimals)
 {
-    std::string s = calc::formatDecimal(value, decimals);
+    std::string s = tabletext::formatDecimal(value, decimals);
     const std::string nbsp{static_cast<char>(0xC2), static_cast<char>(0xA0)};
     const std::size_t signEnd = (!s.empty() && s[0] == '-') ? 1 : 0;
     std::size_t intEnd = s.find(',');
@@ -117,7 +118,7 @@ void postIfAlive(const std::shared_ptr<bool>& alive, std::function<void()> fn)
 // En enda cell från Excel (med avslutande radbrytning) räknas inte.
 bool isBlock(const std::string& text)
 {
-    const auto rows = calc::parseTsv(text);
+    const auto rows = tabletext::parseTsv(text);
     return rows.size() > 1 || (!rows.empty() && rows.front().size() > 1);
 }
 
@@ -416,8 +417,8 @@ bool NormalSpanDialog::loadCalculation()
         for (const auto& p : ns.poles) {
             glaze::DataGrid::Row row;
             row.cells = {p.pole,
-                         p.lengthM ? calc::formatDecimal(*p.lengthM, -1, '.') : std::string(),
-                         p.heightM ? calc::formatDecimal(*p.heightM, -1, '.') : std::string()};
+                         p.lengthM ? tabletext::formatDecimal(*p.lengthM, -1, '.') : std::string(),
+                         p.heightM ? tabletext::formatDecimal(*p.heightM, -1, '.') : std::string()};
             rows.push_back(std::move(row));
         }
         if (existingId_ != 0)
@@ -480,18 +481,18 @@ void NormalSpanDialog::applyReadOnly()
 
 // Läser tabellen till stolpar, utan den sista tomma raden. En cell med ogiltigt tal räknas
 // som tom, och ett fel för den läggs i gridIssues.
-std::vector<calc::SpanPole> NormalSpanDialog::readPoles(std::vector<calc::SpanIssue>& gridIssues) const
+std::vector<ancalc::SpanPole> NormalSpanDialog::readPoles(std::vector<ancalc::SpanIssue>& gridIssues) const
 {
-    std::vector<calc::SpanPole> poles;
+    std::vector<ancalc::SpanPole> poles;
     const int count = std::max(0, poleGrid.rowCount() - 1);
     poles.reserve(static_cast<std::size_t>(count));
     for (int r = 0; r < count; ++r) {
-        calc::SpanPole pole;
+        ancalc::SpanPole pole;
         pole.pole = trim(poleGrid.cell(r, kColPole));
         for (int c = kColLength; c <= kColHeight; ++c) {
             if (poleGrid.hasError(r, c)) {
-                gridIssues.push_back({calc::IssueKind::Error, r,
-                                      c == kColLength ? calc::SpanColumn::Length : calc::SpanColumn::Height,
+                gridIssues.push_back({ancalc::IssueKind::Error, r,
+                                      c == kColLength ? ancalc::SpanColumn::Length : ancalc::SpanColumn::Height,
                                       "Ogiltigt tal."});
                 continue;
             }
@@ -503,9 +504,9 @@ std::vector<calc::SpanPole> NormalSpanDialog::readPoles(std::vector<calc::SpanIs
 }
 
 // Läser gränserna ur de fem talfälten.
-calc::SpanLimits NormalSpanDialog::readLimits() const
+ancalc::SpanLimits NormalSpanDialog::readLimits() const
 {
-    calc::SpanLimits limits;
+    ancalc::SpanLimits limits;
     limits.longest = lim1Spin.value();
     limits.shortest = lim2Spin.value();
     limits.adjacent = lim3Spin.value();
@@ -519,13 +520,13 @@ calc::SpanLimits NormalSpanDialog::readLimits() const
 void NormalSpanDialog::recalc()
 {
     const int rows = poleGrid.rowCount();
-    std::vector<calc::SpanIssue> gridIssues;
-    const std::vector<calc::SpanPole> poles = readPoles(gridIssues);
-    calc_ = calc::calculateNormalSpan(poles, readLimits());
+    std::vector<ancalc::SpanIssue> gridIssues;
+    const std::vector<ancalc::SpanPole> poles = readPoles(gridIssues);
+    calc_ = ancalc::calculateNormalSpan(poles, readLimits());
 
     issues_ = std::move(gridIssues);
     issues_.insert(issues_.end(), calc_.issues.begin(), calc_.issues.end());
-    std::stable_sort(issues_.begin(), issues_.end(), [](const calc::SpanIssue& a, const calc::SpanIssue& b) {
+    std::stable_sort(issues_.begin(), issues_.end(), [](const ancalc::SpanIssue& a, const ancalc::SpanIssue& b) {
         return a.poleIndex < b.poleIndex;
     });
 
@@ -542,7 +543,7 @@ void NormalSpanDialog::recalc()
         info_[static_cast<std::size_t>(firstRow_)].mark[kColLength] = kMarkFirst;
     for (const auto& issue : issues_) {
         const int column = columnOf(issue.column);
-        if (issue.kind != calc::IssueKind::Error || issue.poleIndex < 0 || issue.poleIndex >= rows || column < 0)
+        if (issue.kind != ancalc::IssueKind::Error || issue.poleIndex < 0 || issue.poleIndex >= rows || column < 0)
             continue;
         RowInfo& info = info_[static_cast<std::size_t>(issue.poleIndex)];
         if (info.error[static_cast<std::size_t>(column)].empty())
@@ -556,7 +557,7 @@ void NormalSpanDialog::recalc()
         const auto& spans = calc_.result->spans;
         const double an = calc_.result->an;
         for (std::size_t k = 0; k < spans.size(); ++k) {
-            const calc::SpanCheck& s = spans[k];
+            const ancalc::SpanCheck& s = spans[k];
             if (s.poleIndex < 0 || s.poleIndex >= rows)
                 continue;
             const std::size_t r = static_cast<std::size_t>(s.poleIndex);
@@ -567,10 +568,10 @@ void NormalSpanDialog::recalc()
             info.mark[5] = s.adjacent ? kMarkGreen : kMarkNone;
             info.mark[6] = s.local10 ? (s.localTooLow ? kMarkRed : kMarkGreen) : kMarkNone;
             info.mark[7] = s.local10 ? (s.localTooHigh ? kMarkRed : kMarkGreen) : kMarkNone;
-            texts[r][0] = calc::ratioText(s.ratio);
-            texts[r][1] = calc::ratioText(s.ratio);
-            texts[r][2] = s.adjacent ? calc::adjacentText(*s.adjacent) : std::string("-");
-            texts[r][3] = s.local10 ? calc::localText(*s.local10, an) : std::string("-");
+            texts[r][0] = ancalc::ratioText(s.ratio);
+            texts[r][1] = ancalc::ratioText(s.ratio);
+            texts[r][2] = s.adjacent ? ancalc::adjacentText(*s.adjacent) : std::string("-");
+            texts[r][3] = s.local10 ? ancalc::localText(*s.local10, an) : std::string("-");
             texts[r][4] = texts[r][3];
         }
         for (std::size_t k = 0; k < spans.size(); ++k) {
@@ -597,7 +598,7 @@ void NormalSpanDialog::recalc()
             if (tip.empty() && c == kColLength && info.span >= 0 && calc_.result) {
                 const auto& inclined = calc_.result->spans[static_cast<std::size_t>(info.span)].inclinedM;
                 if (inclined)
-                    tip = "Lutande längd " + calc::formatDecimal(*inclined, 1) + " m";
+                    tip = "Lutande längd " + tabletext::formatDecimal(*inclined, 1) + " m";
             }
             poleGrid.setCellToolTip(r, c, tip);
         }
@@ -627,9 +628,9 @@ void NormalSpanDialog::updateResults()
         return;
     }
 
-    const calc::SpanResult& res = *calc_.result;
-    anValue.setText(calc::formatDecimal(res.an, 1) + " m");
-    anDhValue.setText(res.anDeltaH ? calc::formatDecimal(*res.anDeltaH, 1) + " m" : dash);
+    const ancalc::SpanResult& res = *calc_.result;
+    anValue.setText(tabletext::formatDecimal(res.an, 1) + " m");
+    anDhValue.setText(res.anDeltaH ? tabletext::formatDecimal(*res.anDeltaH, 1) + " m" : dash);
     meanValue.setText(groupedText(res.meanM, 1) + " m");
     totalValue.setText(groupedText(res.totalM, 1) + " m");
     countValue.setText(std::to_string(res.spanCount));
@@ -649,19 +650,19 @@ void NormalSpanDialog::updateResults()
 // Skriver statusraden: det första felet, annars den första varningen, annars sträckan.
 void NormalSpanDialog::updateStatus()
 {
-    const auto describe = [](const calc::SpanIssue& issue) {
+    const auto describe = [](const ancalc::SpanIssue& issue) {
         if (issue.poleIndex >= 0)
             return "Rad " + std::to_string(issue.poleIndex + 1) + ": " + issue.message;
         return issue.message;
     };
     for (const auto& issue : issues_) {
-        if (issue.kind == calc::IssueKind::Error) {
+        if (issue.kind == ancalc::IssueKind::Error) {
             setStatus(describe(issue));
             return;
         }
     }
     for (const auto& issue : issues_) {
-        if (issue.kind == calc::IssueKind::Warning) {
+        if (issue.kind == ancalc::IssueKind::Warning) {
             setStatus(describe(issue));
             return;
         }
@@ -804,7 +805,7 @@ std::string NormalSpanDialog::selectionText()
         for (int c = rect.column0; c <= rect.column1; ++c) {
             if (c == kColLength || c == kColHeight) {
                 const auto value = poleGrid.numberValue(r, c);
-                fields.push_back(value ? calc::formatDecimal(*value, -1, ',') : poleGrid.cell(r, c));
+                fields.push_back(value ? tabletext::formatDecimal(*value, -1, ',') : poleGrid.cell(r, c));
             } else {
                 fields.push_back(poleGrid.cell(r, c));
             }
@@ -813,7 +814,7 @@ std::string NormalSpanDialog::selectionText()
     }
     setStatus("Kopierade " + std::to_string(rows.size()) + " × " +
               std::to_string(rect.column1 - rect.column0 + 1) + " celler");
-    return calc::formatTsv(rows);
+    return tabletext::formatTsv(rows);
 }
 
 // Klistrar in urklippet från cellen och åt höger och nedåt.
@@ -826,7 +827,7 @@ void NormalSpanDialog::pasteAt(CellPos cell)
 // text i en talkolumn avbryter hela inklistringen innan något ändrats.
 void NormalSpanDialog::pasteText(CellPos cell, const std::string& clip)
 {
-    auto block = calc::parseTsv(clip);
+    auto block = tabletext::parseTsv(clip);
     if (block.empty()) {
         setStatus("Urklippet är tomt.");
         return;
@@ -840,7 +841,7 @@ void NormalSpanDialog::pasteText(CellPos cell, const std::string& clip)
             const int column = cell.column + static_cast<int>(j);
             const std::string text = trim(first[j]);
             if ((column == kColLength || column == kColHeight) && !text.empty() &&
-                !calc::parseDecimal(text)) {
+                !tabletext::parseDecimal(text)) {
                 block.erase(block.begin());
                 skipped = 1;
                 break;
@@ -854,7 +855,7 @@ void NormalSpanDialog::pasteText(CellPos cell, const std::string& clip)
             const int column = cell.column + static_cast<int>(j);
             const std::string text = trim(block[i][j]);
             if ((column == kColLength || column == kColHeight) && !text.empty() &&
-                !calc::parseDecimal(text)) {
+                !tabletext::parseDecimal(text)) {
                 glaze::messageBox(
                     *this,
                     "Inklistringen avbröts: \"" + text + "\" på rad " +
@@ -867,7 +868,7 @@ void NormalSpanDialog::pasteText(CellPos cell, const std::string& clip)
         }
     }
 
-    const calc::PastePlan plan = calc::planPaste(cell.row, cell.column, kInputColumns, block);
+    const tabletext::PastePlan plan = tabletext::planPaste(cell.row, cell.column, kInputColumns, block);
     if (plan.cells.empty()) {
         setStatus("Inget att klistra in här. Markera en cell i Stpnr, Spannlängd eller H.");
         return;
@@ -877,8 +878,8 @@ void NormalSpanDialog::pasteText(CellPos cell, const std::string& clip)
     for (const auto& pc : plan.cells) {
         std::string text = trim(pc.text);
         if (pc.column != kColPole) {
-            const auto value = calc::parseDecimal(text);
-            text = value ? calc::formatDecimal(*value, -1, '.') : std::string();
+            const auto value = tabletext::parseDecimal(text);
+            text = value ? tabletext::formatDecimal(*value, -1, '.') : std::string();
         }
         poleGrid.setCell(pc.row, pc.column, text);
     }
@@ -1031,12 +1032,12 @@ bool NormalSpanDialog::saveChanges()
     commitEdits();
     recalc();
 
-    std::vector<const calc::SpanIssue*> errors;
+    std::vector<const ancalc::SpanIssue*> errors;
     for (const auto& issue : issues_)
-        if (issue.kind == calc::IssueKind::Error)
+        if (issue.kind == ancalc::IssueKind::Error)
             errors.push_back(&issue);
     if (!errors.empty()) {
-        const calc::SpanIssue& first = *errors.front();
+        const ancalc::SpanIssue& first = *errors.front();
         std::string text = "Beräkningen kan inte sparas: ";
         if (first.poleIndex >= 0)
             text += "rad " + std::to_string(first.poleIndex + 1) + ": ";
@@ -1055,7 +1056,7 @@ bool NormalSpanDialog::saveChanges()
     ns.id = existingId_;
     ns.note = noteTxt.text();
     ns.limits = readLimits();
-    std::vector<calc::SpanIssue> ignored;
+    std::vector<ancalc::SpanIssue> ignored;
     for (auto& pole : readPoles(ignored)) {
         if (pole.pole.empty() && !pole.lengthM && !pole.heightM)
             continue;

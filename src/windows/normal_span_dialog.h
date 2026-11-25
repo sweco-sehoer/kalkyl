@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "calc/normal_span.h"
+#include "anCalc/normal_span.h"
 #include "projectdb/project_db.h"
 
 // Normalspannsberäkningen: formuläret med tabellen som i Excel och resultatet.
@@ -154,11 +154,11 @@ private:
 
     // Läser tabellen till stolpar, utan den sista tomma raden. En cell med ogiltigt tal
     // räknas som tom och ger ett fel i gridIssues.
-    std::vector<kalkyl::calc::SpanPole> readPoles(
-        std::vector<kalkyl::calc::SpanIssue>& gridIssues) const;
+    std::vector<kalkyl::ancalc::SpanPole> readPoles(
+        std::vector<kalkyl::ancalc::SpanIssue>& gridIssues) const;
 
     // Läser gränserna ur de fem talfälten.
-    kalkyl::calc::SpanLimits readLimits() const;
+    kalkyl::ancalc::SpanLimits readLimits() const;
 
     // Räknar om allt: resultatet, kontrollkolumnerna, färgerna, tooltips, panelen och statusraden.
     void recalc();
@@ -249,8 +249,8 @@ private:
     bool dirty_ = false;                      // något är ändrat sedan inläsningen
     bool saved_ = false;                      // sparat: onClosing frågar inte
     std::optional<std::int64_t> savedId_;
-    kalkyl::calc::SpanCalculation calc_;      // senaste beräkningen
-    std::vector<kalkyl::calc::SpanIssue> issues_;   // fel och varningar, i radordning
+    kalkyl::ancalc::SpanCalculation calc_;      // senaste beräkningen
+    std::vector<kalkyl::ancalc::SpanIssue> issues_;   // fel och varningar, i radordning
     std::vector<RowInfo> info_;               // färger och fel per rad
     int firstRow_ = -1;                       // första raden med innehåll
     CellPos anchor_;                          // markeringens ankare

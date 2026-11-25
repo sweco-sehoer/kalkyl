@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-namespace kalkyl::calc {
+namespace kalkyl::tabletext {
 
 // Ett tal ur text som användaren skrivit eller klistrat in. Decimalkomma eller decimalpunkt,
 // mellanslag (också hårt mellanslag U+00A0 och smalt U+202F) som tusentalsavgränsare, valfritt
@@ -33,4 +33,4 @@ struct PastePlan { std::vector<PasteCell> cells; int rowsNeeded = 0; };
 PastePlan planPaste(int anchorRow, int anchorColumn, int columnCount,
                     const std::vector<std::vector<std::string>>& block);
 
-} // namespace kalkyl::calc
+} // namespace kalkyl::tabletext

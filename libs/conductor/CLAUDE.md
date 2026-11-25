@@ -8,11 +8,9 @@ flytten hit står i `doc/plans/archive/2026-11-23_Normalspann.md` (3.9–3.10).
 
 | Fil | Innehåll |
 |---|---|
-| `CMakeLists.txt` | Biblioteket och testet `conductor` |
+| `CMakeLists.txt` | Biblioteket (testet `conductor` ligger i `tests/`) |
 | `conductor.h` | `Conductor`, `ConductorOrigin`, `ConductorField`, `ConductorIssue`, `kCreepTempTolerance` och funktionerna nedan |
 | `conductor.cpp` | `validateConductor`, `derivedCreepTempC`, `creepTempDeviates`, `sameConductorName`, `sameConductorValues`, `sameConductorData` och `compareNames` |
-| `conductor_test.cpp` | Headless-test: reglerna, `sameConductorData` och `compareNames` |
-
 ## Regler
 
 - **Validering:** `validateConductor` ger en tom lista för en giltig lina. Namnets unikhet kontrolleras inte här.

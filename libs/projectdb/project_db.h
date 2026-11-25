@@ -15,7 +15,7 @@ namespace kalkyl::projectdb {
 
 inline constexpr std::string_view kExtension     = ".kalkyl";
 inline constexpr std::uint32_t    kApplicationId = 0x4B4C4B50;   // "KLKP"
-inline constexpr int              kSchemaVersion = 2;   // antal steg: 1 (v0.1.0) + dev_migration.h
+inline constexpr int              kSchemaVersion = 3;   // antal steg: 1 (v0.1.0) + dev_migration.h
 
 // Projektets uppgifter ur tabellen project.
 struct ProjectInfo { std::string name; std::string createdUtc; std::string createdWith; };
@@ -69,6 +69,7 @@ public:
     const ProjectInfo& info() const;
     Access access() const;
     const std::optional<platform::LockInfo>& lockedBy() const;
+    bool created() const;                           // skapat med create, inte öppnat
     db::Database& local();                          // arbetskopian, för all läsning och skrivning
 
     // Ändringsräknaren. Varje skrivning i arbetskopian (project_data.h) räknar upp revision();
@@ -97,6 +98,7 @@ private:
     platform::FileStamp base_;
     std::uint64_t revision_ = 0;
     std::uint64_t savedRevision_ = 0;
+    bool created_ = false;
     db::Database local_;          // tomt efter en flytt eller close
 };
 

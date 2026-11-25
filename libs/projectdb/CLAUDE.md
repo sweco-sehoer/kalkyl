@@ -4,17 +4,16 @@ Projektdatabasen: en `.kalkyl`-fil per projekt, med lokal arbetskopia, låsfil o
 Biblioteket heter `kalkyl_projectdb`, namnrymden `kalkyl::projectdb` och includes skrivs `"projectdb/project_db.h"`.
 Arbetsmodellen (2.3 till 2.7), schemat (2.10) och API:t (5.5) står i planen `doc/plans/archive/2026-11-20_Grunder.md`.
 Dokumentationens värden, linkopiorna och normalspannsberäkningarna står i planen `doc/plans/archive/2026-11-23_Normalspann.md` (3.3 till 3.12, 4.1 och 5.5 till 5.6).
+Linberäkningarna, kopplingen till Dokumentation och upplösningen står i planen `doc/plans/archive/2026-11-25_Linberakning_fas_2.md` (avsnitt 2.1 till 2.3, 3 och 4).
 
 | Fil | Innehåll |
 |---|---|
-| `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform`, `kalkyl_calc`, `kalkyl_conductor` och `kalkyl_version`) och testet `projectdb` |
+| `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform`, `kalkyl_ancalc`, `kalkyl_conductor`, `kalkyl_linecalc`, `kalkyl_tabletext` och `kalkyl_version`). Testet `projectdb` ligger i `tests/` |
 | `project_db.h` | `ProjectDb`, `OpenOptions`, `Snapshot`, `Access`, `defaultWorkDir`, `withExtension` och `cleanWorkDir` |
-| `dev_migration.h` | Utvecklingsmigreringen: stegen efter v0.1.0 (`dev::kStep2` med de nya tabellerna). Töms vid 1.0.0 |
+| `dev_migration.h` | Utvecklingsmigreringen: stegen efter v0.1.0 (`dev::kStep2` med linkopiorna, Dokumentation och normalspannet, `dev::kStep3` med linberäkningarna). Töms vid 1.0.0 |
 | `project_db.cpp` | Schemat (steg 1, v0.1.0, och stegen ur `dev_migration.h`), `create`, `open` med schemakontroll, lås, städning vid fel, `snapshot`/`publish`/`published`, revisionen och `close` |
-| `project_data.h` | Dataskrivningarna och läsningarna: `DocValue`, `NormalSpan`, `Wire`, `Stage`, `docValues`, `setDocValue`, linkopiorna, beräkningarna och kopplingarna |
+| `project_data.h` | Dataskrivningarna och läsningarna: `DocValue`, `NormalSpan`, `LineCalc`, `Wire`, `Stage`, `docValues`, `setDocValue`, linkopiorna, beräkningarna, kopplingarna och upplösningen av linberäkningarna |
 | `project_data.cpp` | Implementationen av `project_data.h`: SQL i råa strängliteraler, en transaktion per skrivning |
-| `projectdb_test.cpp` | Headless-test med egen mapp (åäö) och egen arbetsmapp. Lämnar `Prov åäö.kalkyl` i `KALKYL_PROV_DIR` |
-
 ## Regler
 
 - **SQLite öppnar aldrig originalet.** `open` kopierar filen med `CopyFileExW` till `workDir`, och allt arbete går mot arbetskopian (`local()`).
@@ -27,17 +26,21 @@ Dokumentationens värden, linkopiorna och normalspannsberäkningarna står i pla
 - **Städning:** varje fel efter att låset tagits släpper låset och tar bort arbetskopian (och ögonblicksbilden vid `create`).
 - **Trådar:** `create` och `open` körs i en arbetstråd. `snapshot` och `published` körs på UI-tråden, `publish` i en arbetstråd.
 - **Arbetsmappen:** `cleanWorkDir` tar bort filer som inte är öppna, och körs vid programstart.
+- **Nytt projekt:** `created()` är sann för ett projekt från `create` (inte `open`), och följer med vid flytt. Huvudfönstret skriver då Dokumentationens förval.
 - **Test:** tar 2 s extra, eftersom en andra öppning i samma process väntar ut den egna lås-regeln.
 
 ## Schemat och schemakontrollen
 
 - **Steg 1** (`kSchemaV1`, v0.1.0) har bara `project` och ändras aldrig.
 - **Steg 2** (`dev::kStep2` i `dev_migration.h`) lägger till `project_conductor`, `doc_value`, `normal_span`, `normal_span_pole` och `doc_normal_span`.
-  `kSchemaVersion` = 2. Ett projekt från v0.1.0 migreras när det öppnas och sparas med det nya schemat vid nästa publicering.
+  Steg 2 är committat i v0.2.0 och ändras aldrig.
+- **Steg 3** (`dev::kStep3`) lägger till `line_calc`, `line_calc_case` (15 rader per beräkning) och `doc_line_calc`. `kSchemaVersion` = 3.
+  Ett projekt från en äldre version migreras när det öppnas och sparas med det nya schemat vid nästa publicering.
+  Migreringstesten är `testMigrateFromV010` och `testMigrateFromV020`.
 - **Schemakontroll:** `open` räknar tabellerna i `kExpectedTablesSql` efter `migrate` och före `quickCheck`. Saknas någon (skadad fil) blir felet `NotADatabase`
   med texten "Projektfilen saknar delar som den här versionen av Kalkyl behöver. Filen är skadad:" följd av en radbrytning och sökvägen.
   Låset och arbetskopian städas som vid andra fel, och texten går inte genom `relabel`. Listan hålls lika med schemat.
-- **Resultatet lagras aldrig.** aₙ räknas med `calc::calculateNormalSpan` från stolparna som `normalSpan` läser.
+- **Resultatet lagras aldrig.** aₙ räknas med `ancalc::calculateNormalSpan` från stolparna som `normalSpan` läser.
 
 ## Dataskrivningarna (`project_data.h`)
 
@@ -54,4 +57,21 @@ Dokumentationens värden, linkopiorna och normalspannsberäkningarna står i pla
   Gränser och tal valideras (ändliga, gränser > 0) och ger `Invalid`.
 - **Kopplingar:** `doc_normal_span(doc_key, span_id)` har `doc_key` som primärnyckel, så en rad visar högst en beräkning, men en beräkning kan visas på flera rader.
   `ON DELETE CASCADE` tar bort kopplingarna och stolparna när beräkningen tas bort. En koppling tömmer radens manuella värde i `doc_value` (referensen står kvar).
-- **Nycklar:** de sex normalspannsnycklarna ges av `normalSpanDocKey(wire, stage)`. Övriga nycklar i `doc_value` är fria.
+- **Nycklar:** de sex normalspannsnycklarna ges av `normalSpanDocKey(wire, stage)` och de sex linberäkningsnycklarna av `lineCalcDocKey(wire, stage)`
+  (`lineCalcRowOf` är motsatsen). Övriga nycklar i `doc_value` är fria.
+
+## Linberäkningarna
+
+- **Lagring:** `line_calc` har en rad per beräkning och `line_calc_case` 15 rader (case_id 1–15). Källor och läge lagras som text, manuell last som två kolumner som båda är NULL eller båda har ett tal.
+  Resultatet lagras aldrig, det räknas med `calculateResolved`. En okänd text eller färre än 15 lastfall ger `Invalid` ("Linberäkningen <id> i projektfilen är skadad.").
+- **Eget lindata:** beräkningen lagrar sin egen kopia av linan (`cond_*`) och rör aldrig `project_conductor`, så `pruneConductors` är oförändrad.
+- **Kopplad och manuell:** `doc_source` är nyckeln för raden som beräkningen hämtar sina indata ur, och NULL betyder manuell.
+  En kopplad beräkning lagrar NULL i `cond_*`, `normal_span_m` och `tension_mpa` (vad `input` än innehåller) och läses tillbaka med dem tomma.
+  `min_temp_c` och `max_temp_c` är det senast hämtade värdet och används aldrig som reserv. Den hör till exakt en rad, en manuell kan visas på flera.
+- **Detach:** en kopplad beräkning som förlorar sin rad blir manuell med Dokumentationens värden i det ögonblicket som egna (`detachLineCalc`, `linkLineCalc` på en rad med en kopplad beräkning och `unlinkDocRow`).
+  `detachLineCalc` låter kopplingen stå kvar, `unlinkDocRow` tar bort den.
+- **Kopplingar:** `doc_line_calc(doc_key, calc_id)` har `doc_key` som primärnyckel. En koppling tömmer radens manuella värde i `doc_value` (referensen står kvar).
+  `saveLineCalc` skriver beräkningen och lastfallen i en transaktion och kopplar den, och `removeLineCalc` tar bort lastfall och kopplingar med kaskaden.
+- **Upplösningen:** `docLineSources` läser Dokumentationens värden, projektets linor och aₙ för varje kopplad normalspannsrad en gång.
+  `resolveLineInput` är ren och sätter in lina, aₙ, σ₀, min och max (aₙ: kopplad beräkning, radens manuella värde, gröna raden). Det som saknas ger en Missing-upplysning med en text om var värdet fylls i.
+  Topplina höger utan rad eller med "Samma" löses upp som vänster. `calculateResolved` ger inget resultat när upplösningen har en upplysning.

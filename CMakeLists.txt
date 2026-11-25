@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 # Projektets version (major.minor.patch) står bara här.
 # Den skrivs in i version.h vid konfigurering, se libs/version/CMakeLists.txt.
 project(Kalkyl
-        VERSION 0.2.0
+        VERSION 0.3.0
         DESCRIPTION "Luftledningsberäkningar"
         LANGUAGES C CXX)
 
@@ -30,7 +30,7 @@ FetchContent_Declare(GlazeUI
     SYSTEM)
 FetchContent_MakeAvailable(GlazeUI)
 
-# Headless-testerna (ctest). Varje bibliotek har sin testfil i sin katalog.
+# Headless-testerna (ctest). Alla tester ligger i tests/, aldrig bland källkoden.
 option(KALKYL_TESTS "Bygg Kalkyls headless-tester (ctest)" OFF)
 if(KALKYL_TESTS)
     enable_testing()
@@ -44,3 +44,6 @@ target_compile_options(kalkyl_warnings INTERFACE -Wall -Wextra -Wno-missing-fiel
 add_subdirectory(libs)
 add_subdirectory(src)
 add_subdirectory(installer)
+if(KALKYL_TESTS)
+    add_subdirectory(tests)
+endif()

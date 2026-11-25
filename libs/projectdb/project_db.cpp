@@ -39,8 +39,9 @@ CREATE TABLE project (
 
 // Tabellerna som schemat ska ha efter alla steg. Listan hålls lika med stegen.
 constexpr std::string_view kExpectedTablesSql =
-    "('project', 'project_conductor', 'doc_value', 'normal_span', 'normal_span_pole', 'doc_normal_span')";
-constexpr int kExpectedTableCount = 6;
+    "('project', 'project_conductor', 'doc_value', 'normal_span', 'normal_span_pole', 'doc_normal_span', "
+    "'line_calc', 'line_calc_case', 'doc_line_calc')";
+constexpr int kExpectedTableCount = 9;
 
 // Schemat för projektfilen: steg 1 och utvecklingsmigreringens steg (dev_migration.h).
 // Bara create får initiera en tom fil.
@@ -48,7 +49,7 @@ db::Schema schema(bool allowInitialize)
 {
     db::Schema s;
     s.applicationId = kApplicationId;
-    s.steps = {kSchemaV1, dev::kStep2};
+    s.steps = {kSchemaV1, dev::kStep2, dev::kStep3};
     s.allowInitialize = allowInitialize;
     return s;
 }
@@ -300,6 +301,7 @@ ProjectDb::ProjectDb(ProjectDb&& other) noexcept
       base_(other.base_),
       revision_(other.revision_),
       savedRevision_(other.savedRevision_),
+      created_(other.created_),
       local_(std::move(other.local_))
 {
     other.localPath_.clear();
@@ -323,6 +325,7 @@ ProjectDb& ProjectDb::operator=(ProjectDb&& other) noexcept
     base_ = other.base_;
     revision_ = other.revision_;
     savedRevision_ = other.savedRevision_;
+    created_ = other.created_;
     local_ = std::move(other.local_);
     other.localPath_.clear();
     other.lock_.reset();
@@ -492,7 +495,15 @@ Result<ProjectDb> ProjectDb::create(const std::string& path, const std::string& 
         return fail(published.error());
     }
     p.published(snap.value(), published.value());
+    p.created_ = true;
     return p;
+}
+
+// Sant när projektet skapades med create i den här körningen, inte öppnades.
+// Huvudfönstret fyller då i Dokumentationens förval.
+bool ProjectDb::created() const
+{
+    return created_;
 }
 
 // Originalets absoluta sökväg, på share eller lokalt.

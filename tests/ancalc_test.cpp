@@ -7,8 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "calc/normal_span.h"
-#include "calc/table_text.h"
+#include "anCalc/normal_span.h"
 
 using namespace kalkyl;
 
@@ -69,15 +68,15 @@ std::string stpnr(int n)
 }
 
 // En stolpe med Stpnr, spannlängd och valfri H.
-calc::SpanPole pole(std::string name, std::optional<double> length, std::optional<double> height = std::nullopt)
+ancalc::SpanPole pole(std::string name, std::optional<double> length, std::optional<double> height = std::nullopt)
 {
     return {std::move(name), length, height};
 }
 
 // Exempel A som stolpar: ST0252 med spannet 274 (ingår inte) och sedan de 280 spannen.
-std::vector<calc::SpanPole> exampleA()
+std::vector<ancalc::SpanPole> exampleA()
 {
-    std::vector<calc::SpanPole> poles;
+    std::vector<ancalc::SpanPole> poles;
     poles.push_back(pole(stpnr(252), 274.0));
     for (std::size_t i = 0; i < std::size(kSpansA); ++i)
         poles.push_back(pole(stpnr(253 + static_cast<int>(i)), kSpansA[i]));
@@ -85,9 +84,9 @@ std::vector<calc::SpanPole> exampleA()
 }
 
 // Exempel B: P0 med 999 (ingår inte) och P1-P11 med ett långt spann vid P6.
-std::vector<calc::SpanPole> exampleB()
+std::vector<ancalc::SpanPole> exampleB()
 {
-    std::vector<calc::SpanPole> poles;
+    std::vector<ancalc::SpanPole> poles;
     poles.push_back(pole("P0", 999.0));
     const double lengths[] = {100, 100, 100, 100, 100, 400, 100, 100, 100, 100, 100};
     for (int i = 0; i < 11; ++i)
@@ -96,7 +95,7 @@ std::vector<calc::SpanPole> exampleB()
 }
 
 // Exempel C: fyra stolpar med höjder. withHeightP2 = false tar bort H på P2.
-std::vector<calc::SpanPole> exampleC(bool withHeightP2 = true)
+std::vector<ancalc::SpanPole> exampleC(bool withHeightP2 = true)
 {
     return {pole("P0", 250.0, 10.0), pole("P1", 300.0, 20.0),
             pole("P2", 200.0, withHeightP2 ? std::optional<double>(15.0) : std::nullopt),
@@ -105,7 +104,7 @@ std::vector<calc::SpanPole> exampleC(bool withHeightP2 = true)
 
 // Stpnr för alla spann i listan som uppfyller villkoret, i ordning.
 template <class Pred>
-std::vector<std::string> polesWhere(const std::vector<calc::SpanPole>& poles, const calc::SpanResult& r, Pred pred)
+std::vector<std::string> polesWhere(const std::vector<ancalc::SpanPole>& poles, const ancalc::SpanResult& r, Pred pred)
 {
     std::vector<std::string> out;
     for (const auto& s : r.spans)
@@ -115,7 +114,7 @@ std::vector<std::string> polesWhere(const std::vector<calc::SpanPole>& poles, co
 }
 
 // Spannet som slutar vid stolpen med Stpnr name.
-const calc::SpanCheck* spanAt(const std::vector<calc::SpanPole>& poles, const calc::SpanResult& r,
+const ancalc::SpanCheck* spanAt(const std::vector<ancalc::SpanPole>& poles, const ancalc::SpanResult& r,
                               const std::string& name)
 {
     for (const auto& s : r.spans)
@@ -129,12 +128,12 @@ void testExampleA()
 {
     const auto poles = exampleA();
     CHECK(poles.size() == 281);
-    const auto calc = calc::calculateNormalSpan(poles, calc::SpanLimits{});
+    const auto calc = ancalc::calculateNormalSpan(poles, ancalc::SpanLimits{});
     CHECK(calc.result.has_value());
     CHECK(calc.issues.empty());
     if (!calc.result)
         return;
-    const calc::SpanResult& r = *calc.result;
+    const ancalc::SpanResult& r = *calc.result;
     CHECK(near(r.anExact, 343.1371310, 1e-6));
     CHECK(near(r.an, 343.1, 1e-9));
     CHECK(!r.anDeltaH.has_value());
@@ -153,11 +152,11 @@ void testExampleA()
     CHECK(r.localHighCount == 1);
 
     const std::vector<std::string> shortOnes = {"ST0325", "ST0375", "ST0393", "ST0451", "ST0459"};
-    CHECK(polesWhere(poles, r, [](const calc::SpanCheck& s) { return s.tooShort; }) == shortOnes);
-    CHECK(polesWhere(poles, r, [](const calc::SpanCheck& s) { return s.localTooLow; }) == kLocalLowA);
+    CHECK(polesWhere(poles, r, [](const ancalc::SpanCheck& s) { return s.tooShort; }) == shortOnes);
+    CHECK(polesWhere(poles, r, [](const ancalc::SpanCheck& s) { return s.localTooLow; }) == kLocalLowA);
     const std::vector<std::string> highOnes = {"ST0283"};
-    CHECK(polesWhere(poles, r, [](const calc::SpanCheck& s) { return s.localTooHigh; }) == highOnes);
-    const auto low = polesWhere(poles, r, [](const calc::SpanCheck& s) { return s.localTooLow; });
+    CHECK(polesWhere(poles, r, [](const ancalc::SpanCheck& s) { return s.localTooHigh; }) == highOnes);
+    const auto low = polesWhere(poles, r, [](const ancalc::SpanCheck& s) { return s.localTooLow; });
     CHECK(!low.empty() && low.front() == "ST0300" && low.back() == "ST0503");
 
     const auto* s325 = spanAt(poles, r, "ST0325");
@@ -165,20 +164,20 @@ void testExampleA()
     const auto* s283 = spanAt(poles, r, "ST0283");
     CHECK(s283 && s283->local10 && near(*s283->local10, 395.250, 1e-3));
     CHECK(s283 && s283->local10 && near(*s283->local10 / r.an, 1.152, 1e-3));
-    CHECK(s283 && s283->local10 && calc::localText(*s283->local10, r.an) == "395 / 1,15");
+    CHECK(s283 && s283->local10 && ancalc::localText(*s283->local10, r.an) == "395 / 1,15");
 
     const auto* first = spanAt(poles, r, "ST0263");
     CHECK(first && first->local10 && near(*first->local10, 356.496, 1e-3));
-    CHECK(first && first->local10 && calc::localText(*first->local10, r.an) == "356 / 1,04");
+    CHECK(first && first->local10 && ancalc::localText(*first->local10, r.an) == "356 / 1,04");
     const auto* last = spanAt(poles, r, "ST0532");
     CHECK(last && last->local10 && near(*last->local10, 332.253, 1e-3));
-    CHECK(last && last->local10 && calc::localText(*last->local10, r.an) == "332 / 0,97");
+    CHECK(last && last->local10 && ancalc::localText(*last->local10, r.an) == "332 / 0,97");
     const auto* before = spanAt(poles, r, "ST0262");
     CHECK(before && !before->local10.has_value());
 
     const auto* s253 = spanAt(poles, r, "ST0253");
     CHECK(s253 && near(s253->ratio, 0.98514, 1e-5));
-    CHECK(s253 && calc::ratioText(s253->ratio) == "0,99");
+    CHECK(s253 && ancalc::ratioText(s253->ratio) == "0,99");
     CHECK(s253 && !s253->adjacent.has_value());
 
     double maxUp = 0;
@@ -194,14 +193,14 @@ void testExampleA()
     CHECK(near(maxUp, 2.316, 1e-3));
     CHECK(near(maxDown, 2.013, 1e-3));
 
-    calc::SpanLimits tighter;
+    ancalc::SpanLimits tighter;
     tighter.shortest = 0.45;
-    const auto other = calc::calculateNormalSpan(poles, tighter);
+    const auto other = ancalc::calculateNormalSpan(poles, tighter);
     CHECK(other.result.has_value());
     if (other.result) {
         const std::vector<std::string> three = {"ST0393", "ST0451", "ST0459"};
         CHECK(other.result->tooShortCount == 3);
-        CHECK(polesWhere(poles, *other.result, [](const calc::SpanCheck& s) { return s.tooShort; }) == three);
+        CHECK(polesWhere(poles, *other.result, [](const ancalc::SpanCheck& s) { return s.tooShort; }) == three);
     }
 }
 
@@ -209,12 +208,12 @@ void testExampleA()
 void testExampleB()
 {
     const auto poles = exampleB();
-    const auto calc = calc::calculateNormalSpan(poles, calc::SpanLimits{});
+    const auto calc = ancalc::calculateNormalSpan(poles, ancalc::SpanLimits{});
     CHECK(calc.result.has_value());
     CHECK(calc.issues.empty());
     if (!calc.result)
         return;
-    const calc::SpanResult& r = *calc.result;
+    const ancalc::SpanResult& r = *calc.result;
     CHECK(r.spanCount == 11);
     CHECK(r.poleCount == 12);
     CHECK(near(r.totalM, 1400, 1e-9));
@@ -228,7 +227,7 @@ void testExampleB()
     CHECK(r.localHighCount == 0);
 
     const std::vector<std::string> longOnes = {"P6"};
-    CHECK(polesWhere(poles, r, [](const calc::SpanCheck& s) { return s.tooLong; }) == longOnes);
+    CHECK(polesWhere(poles, r, [](const ancalc::SpanCheck& s) { return s.tooLong; }) == longOnes);
     const auto* p6 = spanAt(poles, r, "P6");
     CHECK(p6 && near(p6->ratio, 1.7399, 1e-4));
     std::size_t shortCount = 0;
@@ -241,13 +240,13 @@ void testExampleB()
     CHECK(p1 && !p1->adjacent.has_value() && !p1->adjacentExceeded);
     for (const char* name : {"P2", "P3", "P4", "P5", "P8", "P9", "P10", "P11"}) {
         const auto* s = spanAt(poles, r, name);
-        CHECK(s && s->adjacent && calc::adjacentText(*s->adjacent) == "1 : 1" && !s->adjacentExceeded);
+        CHECK(s && s->adjacent && ancalc::adjacentText(*s->adjacent) == "1 : 1" && !s->adjacentExceeded);
     }
     const auto* p5 = spanAt(poles, r, "P5");
     CHECK(p5 && !p5->adjacentExceeded);
     for (const char* name : {"P6", "P7"}) {
         const auto* s = spanAt(poles, r, name);
-        CHECK(s && s->adjacent && calc::adjacentText(*s->adjacent) == "1 : 4" && s->adjacentExceeded);
+        CHECK(s && s->adjacent && ancalc::adjacentText(*s->adjacent) == "1 : 4" && s->adjacentExceeded);
     }
 
     for (const auto& s : r.spans) {
@@ -258,7 +257,7 @@ void testExampleB()
     }
     const auto* p11 = spanAt(poles, r, "P11");
     CHECK(p11 && p11->local10 && near(*p11->local10, 236.968, 1e-3));
-    CHECK(p11 && p11->local10 && calc::localText(*p11->local10, r.an) == "237 / 1,03");
+    CHECK(p11 && p11->local10 && ancalc::localText(*p11->local10, r.an) == "237 / 1,03");
     CHECK(p11 && !p11->localTooLow && !p11->localTooHigh);
 }
 
@@ -267,11 +266,11 @@ void testExampleC()
 {
     {
         const auto poles = exampleC();
-        const auto calc = calc::calculateNormalSpan(poles, calc::SpanLimits{});
+        const auto calc = ancalc::calculateNormalSpan(poles, ancalc::SpanLimits{});
         CHECK(calc.result.has_value());
         CHECK(calc.issues.empty());
         if (calc.result) {
-            const calc::SpanResult& r = *calc.result;
+            const ancalc::SpanResult& r = *calc.result;
             CHECK(near(r.anExact, 331.6624790, 1e-6));
             CHECK(near(r.an, 331.7, 1e-9));
             CHECK(r.anDeltaH && near(*r.anDeltaH, 331.5, 1e-9));
@@ -287,7 +286,7 @@ void testExampleC()
     }
     {
         const auto poles = exampleC(false);
-        const auto calc = calc::calculateNormalSpan(poles, calc::SpanLimits{});
+        const auto calc = ancalc::calculateNormalSpan(poles, ancalc::SpanLimits{});
         CHECK(calc.result.has_value());
         if (calc.result) {
             CHECK(near(calc.result->an, 331.7, 1e-9));
@@ -295,9 +294,9 @@ void testExampleC()
         }
         CHECK(calc.issues.size() == 1);
         if (calc.issues.size() == 1) {
-            CHECK(calc.issues[0].kind == calc::IssueKind::Warning);
+            CHECK(calc.issues[0].kind == ancalc::IssueKind::Warning);
             CHECK(calc.issues[0].poleIndex == -1);
-            CHECK(calc.issues[0].column == calc::SpanColumn::None);
+            CHECK(calc.issues[0].column == ancalc::SpanColumn::None);
             CHECK(calc.issues[0].message ==
                   "H saknas på 1 av 4 stolpar. aₙ,ΔH räknas bara när alla stolpar har H.");
         }
@@ -309,54 +308,54 @@ void testEdgeCases()
 {
     const std::string minTwo = "Minst två stolpar (ett spann) behövs.";
     {
-        const auto calc = calc::calculateNormalSpan({}, calc::SpanLimits{});
+        const auto calc = ancalc::calculateNormalSpan({}, ancalc::SpanLimits{});
         CHECK(!calc.result.has_value());
         CHECK(calc.issues.size() == 1);
         if (!calc.issues.empty()) {
-            CHECK(calc.issues[0].kind == calc::IssueKind::Error);
+            CHECK(calc.issues[0].kind == ancalc::IssueKind::Error);
             CHECK(calc.issues[0].poleIndex == -1);
-            CHECK(calc.issues[0].column == calc::SpanColumn::None);
+            CHECK(calc.issues[0].column == ancalc::SpanColumn::None);
             CHECK(calc.issues[0].message == minTwo);
         }
     }
     {
-        const auto calc = calc::calculateNormalSpan({pole("P0", 100.0)}, calc::SpanLimits{});
+        const auto calc = ancalc::calculateNormalSpan({pole("P0", 100.0)}, ancalc::SpanLimits{});
         CHECK(!calc.result.has_value());
         CHECK(!calc.issues.empty() && calc.issues[0].message == minTwo);
     }
     {
         auto poles = exampleC();
         poles[2].lengthM.reset();
-        const auto calc = calc::calculateNormalSpan(poles, calc::SpanLimits{});
+        const auto calc = ancalc::calculateNormalSpan(poles, ancalc::SpanLimits{});
         CHECK(!calc.result.has_value());
         CHECK(calc.issues.size() == 1);
         if (!calc.issues.empty()) {
-            CHECK(calc.issues[0].kind == calc::IssueKind::Error);
+            CHECK(calc.issues[0].kind == ancalc::IssueKind::Error);
             CHECK(calc.issues[0].poleIndex == 2);
-            CHECK(calc.issues[0].column == calc::SpanColumn::Length);
+            CHECK(calc.issues[0].column == ancalc::SpanColumn::Length);
             CHECK(calc.issues[0].message == "Spannlängd saknas.");
         }
     }
     {
         auto poles = exampleC();
         poles[2].lengthM = 0.0;
-        const auto calc = calc::calculateNormalSpan(poles, calc::SpanLimits{});
+        const auto calc = ancalc::calculateNormalSpan(poles, ancalc::SpanLimits{});
         CHECK(!calc.result.has_value());
         CHECK(!calc.issues.empty() && calc.issues[0].poleIndex == 2 &&
-              calc.issues[0].column == calc::SpanColumn::Length &&
+              calc.issues[0].column == ancalc::SpanColumn::Length &&
               calc.issues[0].message == "Spannlängden måste vara större än 0.");
     }
     {
         auto poles = exampleC();
         poles[1].lengthM = std::numeric_limits<double>::quiet_NaN();
         poles[3].heightM = std::numeric_limits<double>::infinity();
-        const auto calc = calc::calculateNormalSpan(poles, calc::SpanLimits{});
+        const auto calc = ancalc::calculateNormalSpan(poles, ancalc::SpanLimits{});
         CHECK(!calc.result.has_value());
         CHECK(calc.issues.size() == 2);
         if (calc.issues.size() == 2) {
-            CHECK(calc.issues[0].poleIndex == 1 && calc.issues[0].column == calc::SpanColumn::Length &&
+            CHECK(calc.issues[0].poleIndex == 1 && calc.issues[0].column == ancalc::SpanColumn::Length &&
                   calc.issues[0].message == "Ogiltigt tal.");
-            CHECK(calc.issues[1].poleIndex == 3 && calc.issues[1].column == calc::SpanColumn::Height &&
+            CHECK(calc.issues[1].poleIndex == 3 && calc.issues[1].column == ancalc::SpanColumn::Height &&
                   calc.issues[1].message == "Ogiltigt tal.");
         }
     }
@@ -364,11 +363,11 @@ void testEdgeCases()
         // En helt tom rad mellan P1 och P2 ger samma resultat som utan raden.
         auto poles = exampleC();
         poles.insert(poles.begin() + 2, pole("", std::nullopt));
-        const auto calc = calc::calculateNormalSpan(poles, calc::SpanLimits{});
+        const auto calc = ancalc::calculateNormalSpan(poles, ancalc::SpanLimits{});
         CHECK(calc.result.has_value());
         CHECK(calc.issues.empty());
         if (calc.result) {
-            const calc::SpanResult& r = *calc.result;
+            const ancalc::SpanResult& r = *calc.result;
             CHECK(near(r.meanM, 300.0, 1e-9));
             CHECK(r.poleCount == 4);
             CHECK(near(r.an, 331.7, 1e-9));
@@ -382,99 +381,18 @@ void testEdgeCases()
         }
     }
     for (const double bad : {0.0, std::numeric_limits<double>::quiet_NaN()}) {
-        calc::SpanLimits limits;
+        ancalc::SpanLimits limits;
         limits.adjacent = bad;
-        const auto calc = calc::calculateNormalSpan(exampleC(), limits);
+        const auto calc = ancalc::calculateNormalSpan(exampleC(), limits);
         CHECK(!calc.result.has_value());
         CHECK(!calc.issues.empty());
         if (!calc.issues.empty()) {
-            CHECK(calc.issues[0].poleIndex == -1 && calc.issues[0].column == calc::SpanColumn::None);
+            CHECK(calc.issues[0].poleIndex == -1 && calc.issues[0].column == ancalc::SpanColumn::None);
             CHECK(calc.issues[0].message == "Gränserna måste vara tal större än 0.");
         }
     }
-    CHECK(near(calc::roundTenth(0.25), 0.3, 1e-12));
-    CHECK(near(calc::roundTenth(-0.25), -0.3, 1e-12));
-}
-
-// Tal, tabbseparerad text och inklistring.
-void testTableText()
-{
-    using calc::formatDecimal;
-    using calc::parseDecimal;
-
-    CHECK(parseDecimal("332,247") && near(*parseDecimal("332,247"), 332.247, 1e-12));
-    CHECK(parseDecimal("332.247") && near(*parseDecimal("332.247"), 332.247, 1e-12));
-    CHECK(parseDecimal("1 234,5") && near(*parseDecimal("1 234,5"), 1234.5, 1e-12));
-    CHECK(parseDecimal("1\xC2\xA0" "234,5") && near(*parseDecimal("1\xC2\xA0" "234,5"), 1234.5, 1e-12));
-    CHECK(parseDecimal("1\xE2\x80\xAF" "234,5") && near(*parseDecimal("1\xE2\x80\xAF" "234,5"), 1234.5, 1e-12));
-    CHECK(parseDecimal("\xE2\x88\x92" "3") && near(*parseDecimal("\xE2\x88\x92" "3"), -3, 1e-12));
-    CHECK(parseDecimal("+4,5") && near(*parseDecimal("+4,5"), 4.5, 1e-12));
-    CHECK(parseDecimal("1e3") && near(*parseDecimal("1e3"), 1000, 1e-9));
-    CHECK(!parseDecimal("1.234,5"));
-    CHECK(!parseDecimal("abc"));
-    CHECK(!parseDecimal(""));
-    CHECK(!parseDecimal("inf"));
-    CHECK(!parseDecimal("1,2,3"));
-    CHECK(!parseDecimal("12 abc"));
-
-    CHECK(formatDecimal(332.247, -1, ',') == "332,247");
-    CHECK(formatDecimal(343.1, 1) == "343,1");
-    CHECK(formatDecimal(0.98514, 2) == "0,99");
-    CHECK(formatDecimal(1, -1) == "1");
-    CHECK(formatDecimal(-0.0, -1) == "0");
-    CHECK(formatDecimal(89160.401, -1, '.') == "89160.401");
-
-    const std::string crlf = {char{13}, char{10}};
-    const std::string lf(1, char{10});
-    const std::string tab(1, char{9});
-    const std::string quote(1, char{34});
-
-    const std::string excel = "a" + tab + "b" + tab + "c" + crlf + "1" + tab + "2" + tab + "3" + crlf +
-                              "4" + tab + "5" + tab + "6" + crlf;
-    const auto grid = calc::parseTsv(excel);
-    CHECK(grid.size() == 3);
-    bool shape = true;
-    for (const auto& row : grid)
-        shape = shape && row.size() == 3;
-    CHECK(shape);
-    CHECK(grid.size() == 3 && grid[1][2] == "3" && grid[2][0] == "4");
-    const std::string back = "a" + tab + "b" + tab + "c" + lf + "1" + tab + "2" + tab + "3" + lf +
-                             "4" + tab + "5" + tab + "6" + lf;
-    CHECK(calc::formatTsv(grid) == back);
-
-    const std::string quoted = quote + "x" + tab + "y" + quote + quote + "z" + lf + "w" + quote + tab + "q";
-    const auto q = calc::parseTsv(quoted);
-    CHECK(q.size() == 1 && q[0].size() == 2);
-    CHECK(q.size() == 1 && q[0].size() == 2 && q[0][0] == "x" + tab + "y" + quote + "z" + lf + "w");
-    CHECK(q.size() == 1 && q[0].size() == 2 && q[0][1] == "q");
-    CHECK(calc::formatTsv({{"x" + tab + "y" + quote + "z"}}) == quote + "x" + tab + "y" + quote + quote + "z" + quote + lf);
-
-    const auto column = calc::parseTsv("a" + lf + "b" + lf + "c");
-    CHECK(column.size() == 3 && column[0].size() == 1 && column[2][0] == "c");
-    const auto rowOnly = calc::parseTsv("a" + tab + "b" + tab + "c");
-    CHECK(rowOnly.size() == 1 && rowOnly[0].size() == 3);
-    const auto gaps = calc::parseTsv("a" + tab + tab + "c" + tab + lf + tab + "z");
-    CHECK(gaps.size() == 2 && gaps[0].size() == 4 && gaps[0][1].empty() && gaps[0][2] == "c" && gaps[0][3].empty());
-    CHECK(gaps.size() == 2 && gaps[1].size() == 2 && gaps[1][0].empty() && gaps[1][1] == "z");
-    CHECK(calc::parseTsv("").empty());
-    CHECK(calc::parseTsv(lf).size() == 1);
-
-    const std::vector<std::vector<std::string>> block23 = {{"1", "2", "3"}, {"4", "5", "6"}};
-    const auto p1 = calc::planPaste(5, 1, 3, block23);
-    CHECK(p1.cells.size() == 4);
-    CHECK(p1.rowsNeeded == 7);
-    CHECK(p1.cells.size() == 4 && p1.cells[0].row == 5 && p1.cells[0].column == 1 && p1.cells[0].text == "1");
-    CHECK(p1.cells.size() == 4 && p1.cells[3].row == 6 && p1.cells[3].column == 2 && p1.cells[3].text == "5");
-    const auto p2 = calc::planPaste(0, 0, 3, {{"a", "b", "c", "d", "e"}});
-    CHECK(p2.cells.size() == 3);
-    CHECK(p2.rowsNeeded == 1);
-    const auto p3 = calc::planPaste(0, 2, 3, {{"a"}, {"b"}, {"c"}});
-    CHECK(p3.cells.size() == 3);
-    bool onlyCol2 = true;
-    for (const auto& c : p3.cells)
-        onlyCol2 = onlyCol2 && c.column == 2;
-    CHECK(onlyCol2);
-    CHECK(p3.rowsNeeded == 3);
+    CHECK(near(ancalc::roundTenth(0.25), 0.3, 1e-12));
+    CHECK(near(ancalc::roundTenth(-0.25), -0.3, 1e-12));
 }
 
 } // namespace
@@ -485,10 +403,9 @@ int main()
     testExampleB();
     testExampleC();
     testEdgeCases();
-    testTableText();
     if (g_failures == 0)
-        std::cout << "calc: alla kontroller lyckades" << std::endl;
+        std::cout << "ancalc: alla kontroller lyckades" << std::endl;
     else
-        std::cerr << "calc: " << g_failures << " kontroller misslyckades" << std::endl;
+        std::cerr << "ancalc: " << g_failures << " kontroller misslyckades" << std::endl;
     return g_failures == 0 ? 0 : 1;
 }

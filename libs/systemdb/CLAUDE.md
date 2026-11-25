@@ -9,12 +9,10 @@ Typen `Conductor` och valideringen ligger i `libs/conductor` (`kalkyl::conductor
 
 | Fil | Innehåll |
 |---|---|
-| `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform` och `kalkyl_conductor`) och testet `systemdb` |
+| `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform` och `kalkyl_conductor`). Testet `systemdb` ligger i `tests/` |
 | `system_db.h` | `SystemDb`, `ThemeMode`, `RecentProject`, `kMaxRecent`, `kApplicationId`, `kAutosaveChoices`, `kDefaultAutosaveMinutes` och `defaultPath()` |
 | `system_db.cpp` | Öppning, migrering, schemakontroll, undanflyttning av skadad fil, inställningar, senaste-listan och linregistret |
 | `conductor_seed_v1.h` | Startdatan: SWECO:s 129 linor som SQL (`kConductorSeedV1`), en del av schemats steg 1 |
-| `systemdb_test.cpp` | Headless-test i en temporär mapp med åäö i namnet (ctest-namn `systemdb`) |
-
 ## Regler
 
 - **Plats:** `defaultPath()` ger `system.db` i `platform::kalkylDataDir()`. `KALKYL_DATA_DIR` ersätter mappen.

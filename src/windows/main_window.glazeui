@@ -60,6 +60,9 @@ void MainWindow::initializeComponent()
     nsSida.name = "nsSida";
     nsSida.setText("Normalspann");
 
+    lcSida.name = "lcSida";
+    lcSida.setText("Linberäkning");
+
     byggPmPanel.name = "byggPmPanel";
     byggPmPanel.dock = glaze::Dock::Fill;
 
@@ -68,6 +71,9 @@ void MainWindow::initializeComponent()
 
     nsPanel.name = "nsPanel";
     nsPanel.dock = glaze::Dock::Fill;
+
+    lcPanel.name = "lcPanel";
+    lcPanel.dock = glaze::Dock::Fill;
 
     byggPmRubrik.name = "byggPmRubrik";
     byggPmRubrik.setText("Enligt ByggPM");
@@ -105,7 +111,7 @@ void MainWindow::initializeComponent()
     byggPmLila.name = "byggPmLila";
     byggPmLila.setText("■");
     byggPmLila.setColor(gfx::Color{150, 100, 210, 255});
-    byggPmLila.setToolTip("Beräkningar före ombyggnation");
+    byggPmLila.setToolTip("Beräkningar före ombyggnad");
     byggPmLila.anchorLeft = {"byggPmFore", 12};
     byggPmLila.y = 18;
 
@@ -118,7 +124,7 @@ void MainWindow::initializeComponent()
     byggPmRosa.name = "byggPmRosa";
     byggPmRosa.setText("■");
     byggPmRosa.setColor(gfx::Color{210, 90, 140, 255});
-    byggPmRosa.setToolTip("Beräkningar efter ombyggnation");
+    byggPmRosa.setToolTip("Beräkningar efter ombyggnad");
     byggPmRosa.anchorLeft = {"byggPmEfter", 12};
     byggPmRosa.y = 18;
 
@@ -196,6 +202,45 @@ void MainWindow::initializeComponent()
     nsLista.setHeaderLines(2);
     nsLista.setColumns({{.text = "Från", .width = 90}, {.text = "Till", .width = 90}, {.text = "Spann", .width = 60, .align = glaze::Align::Right}, {.text = "Totallängd\nm", .width = 90, .align = glaze::Align::Right}, {.text = "aₙ\nm", .width = 70, .align = glaze::Align::Right}, {.text = "aₙ,ΔH\nm", .width = 70, .align = glaze::Align::Right}, {.text = "Avvikelser", .width = 90, .align = glaze::Align::Right}, {.text = "Dokumentation", .width = 170}, {.text = "Anteckning", .width = 200, .sizing = glaze::ColumnSizing::Autosize}});
 
+    lcRubrik.name = "lcRubrik";
+    lcRubrik.setText("Linberäkningar");
+    lcRubrik.setRole(glaze::Label::Role::Heading);
+    lcRubrik.x = 16;
+    lcRubrik.y = 8;
+
+    lcNyBtn.name = "lcNyBtn";
+    lcNyBtn.setText("Ny beräkning…");
+    lcNyBtn.setImg(glaze::stockIcon(glaze::StockIcon::Add));
+    lcNyBtn.x = 16;
+    lcNyBtn.anchorTop = {"lcRubrik", 8};
+
+    lcAndraBtn.name = "lcAndraBtn";
+    lcAndraBtn.setText("Ändra…");
+    lcAndraBtn.setImg(glaze::stockIcon(glaze::StockIcon::Edit));
+    lcAndraBtn.anchorLeft = {"lcNyBtn", 8};
+    lcAndraBtn.anchorTop = {"lcRubrik", 8};
+
+    lcKopieraBtn.name = "lcKopieraBtn";
+    lcKopieraBtn.setText("Kopiera…");
+    lcKopieraBtn.setImg(glaze::stockIcon(glaze::StockIcon::Duplicate));
+    lcKopieraBtn.anchorLeft = {"lcAndraBtn", 8};
+    lcKopieraBtn.anchorTop = {"lcRubrik", 8};
+
+    lcTaBortBtn.name = "lcTaBortBtn";
+    lcTaBortBtn.setText("Ta bort");
+    lcTaBortBtn.setImg(glaze::stockIcon(glaze::StockIcon::Remove));
+    lcTaBortBtn.anchorLeft = {"lcKopieraBtn", 8};
+    lcTaBortBtn.anchorTop = {"lcRubrik", 8};
+
+    lcLista.name = "lcLista";
+    lcLista.anchors = {true, true, true, true};
+    lcLista.x = 16;
+    lcLista.anchorTop = {"lcNyBtn", 8};
+    lcLista.right = 16;
+    lcLista.bottom = 16;
+    lcLista.setHeaderLines(2);
+    lcLista.setColumns({{.text = "Lina", .width = 260}, {.text = "Indata", .width = 100}, {.text = "Läge", .width = 60}, {.text = "aₙ\nm", .width = 70, .align = glaze::Align::Right}, {.text = "σ₀\nMPa", .width = 70, .align = glaze::Align::Right}, {.text = "T₀\n°C", .width = 60, .align = glaze::Align::Right}, {.text = "Min / max\n°C", .width = 90, .align = glaze::Align::Right}, {.text = "Mall\nlastfall 15", .width = 80, .align = glaze::Align::Right}, {.text = "Högsta utnyttj.\n%", .width = 110, .align = glaze::Align::Right}, {.text = "Dokumentation", .width = 170}, {.text = "Anteckning", .width = 200, .sizing = glaze::ColumnSizing::Autosize}});
+
     themeBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { themeBtnClicked(s, e); };
     byggPmGrid.onCommit = [this](glaze::Widget* s, glaze::CellChangeArgs& e) { byggPmGridCommitted(s, e); };
     byggPmGrid.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { byggPmGridContextMenu(s, e); };
@@ -206,6 +251,13 @@ void MainWindow::initializeComponent()
     nsLista.onActivate = [this](glaze::Widget* s, glaze::ActivateArgs& e) { nsListaActivated(s, e); };
     nsLista.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { nsListaChanged(s, e); };
     nsLista.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { nsListaContextMenu(s, e); };
+    lcNyBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { lcNyBtnClicked(s, e); };
+    lcAndraBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { lcAndraBtnClicked(s, e); };
+    lcKopieraBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { lcKopieraBtnClicked(s, e); };
+    lcTaBortBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { lcTaBortBtnClicked(s, e); };
+    lcLista.onActivate = [this](glaze::Widget* s, glaze::ActivateArgs& e) { lcListaActivated(s, e); };
+    lcLista.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { lcListaChanged(s, e); };
+    lcLista.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { lcListaContextMenu(s, e); };
     autosaveTimer.onTick = [this](glaze::Timer* s, glaze::TimerArgs& e) { autosaveTimerTick(s, e); };
     glaze::AppWindow::onLoad = [this](glaze::Widget* s, glaze::EventArgs& e) { onLoad(s, e); };
     glaze::AppWindow::onClose = [this](glaze::Widget* s, glaze::CloseArgs& e) { onClosing(s, e); };
@@ -215,9 +267,11 @@ void MainWindow::initializeComponent()
     flikar.adopt(byggPmSida);
     flikar.adopt(stolpSida);
     flikar.adopt(nsSida);
+    flikar.adopt(lcSida);
     byggPmSida.adopt(byggPmPanel);
     stolpSida.adopt(stolpPanel);
     nsSida.adopt(nsPanel);
+    lcSida.adopt(lcPanel);
     byggPmPanel.adopt(byggPmRubrik);
     byggPmPanel.adopt(byggPmBla);
     byggPmPanel.adopt(byggPmGron);
@@ -235,4 +289,10 @@ void MainWindow::initializeComponent()
     nsPanel.adopt(nsKopieraBtn);
     nsPanel.adopt(nsTaBortBtn);
     nsPanel.adopt(nsLista);
+    lcPanel.adopt(lcRubrik);
+    lcPanel.adopt(lcNyBtn);
+    lcPanel.adopt(lcAndraBtn);
+    lcPanel.adopt(lcKopieraBtn);
+    lcPanel.adopt(lcTaBortBtn);
+    lcPanel.adopt(lcLista);
 }

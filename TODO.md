@@ -26,8 +26,15 @@
 
 ## Idéer
 
+- 💡 Linberäkningens övriga ark ur Linberäkning.xlsm: Isolatorutslag, Lokal islast, Regleringstabell, Nedhäng,
+  Slackutslag, lastfallsdiagrammet och utskriftens "Linbrott lastfall ID 5". Se doc/plans/archive/2026-11-25_Linberakning.md, 1.3.
+- 💡 Fler Excel-facit för linberäkningen: testfallen T2 och T11–T16 i doc/plans/archive/2026-11-25_Linberakning.md, 6.4
+  (D1, korsningsmall med ändrad min/max, manuell last) som tester i `tests/`, som E1–E10.
+- 💡 Sammanslagning (Sammanslagning.xlsm) som egen beräkningsmodul.
 - 💡 Spara Stolptabell före i projektdatabasen (egen plan). Formuläret för normalspann kan då få
   "Hämta från stolptabellen".
+- 💡 Normalspannsformuläret använder `libs/sheetGrid` för markering och urklipp, som formuläret Linberäkning.
+  Biblioteket behöver då stöd för att lägga till och ta bort rader.
 - 💡 Områdesmarkering, dragmarkering, urklipp och ångra i GlazeUI:s DataGrid. Kalkyl emulerar i dag markeringen
   i normalspannsformuläret. Se doc/plans/archive/2026-11-23_Normalspann.md, avsnitt 3.11 och 14.
 - 💡 Kodsignering av setup.exe, avinstallera.exe och kalkyl.exe med SWECO:s certifikat (SmartScreen, AppLocker).

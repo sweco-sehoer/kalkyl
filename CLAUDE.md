@@ -9,19 +9,25 @@ Fönstren ligger i `src/windows/`, stödbiblioteken i `libs/`.
 | Del | Katalog | Innehåll |
 |---|---|---|
 | Projektväljare | `src/windows/project_picker.*` | Startfönstret: de 10 senaste projekten, Öppna, Öppna annat projekt…, Nytt projekt… och Ta bort ur listan |
-| Huvudfönster | `src/windows/main_window.*` | Programikon (stor med verktygsfält), menyer och lägesknapp i namnlisten, flikarna Dokumentation (uppgifter enligt ByggPM i blått, grönt och gult, beräkningar före i lila och efter i rosa; fas- och topplina kopieras ur linregistret till projektet; högerklick på normalspannsraderna), Stolptabell före och Normalspann (alla beräkningar, även lösa), Arkiv > Spara (Ctrl+S), automatisk sparning och statusrad |
+| Huvudfönster | `src/windows/main_window.*` | Programikon (stor med verktygsfält), menyer och lägesknapp i namnlisten, flikarna Dokumentation (uppgifter enligt ByggPM i blått, grönt och gult, beräkningar före i lila och efter i rosa; fas- och topplina kopieras ur linregistret till projektet; högerklick på normalspanns- och linberäkningsraderna; ett nytt projekt får förval), Stolptabell före, Normalspann och Linberäkning (alla beräkningar, även lösa), Arkiv > Spara (Ctrl+S), automatisk sparning och statusrad |
 | Lindata | `src/windows/conductor_dialog.*` | Inställningar > Lindata…: redigera linregistret (lägg till, ta bort, återställ startdata) |
 | Normalspann | `src/windows/normal_span_dialog.*` | Formuläret Normalspannsberäkning enligt Normalspannberäkning.xlsm: tabell med Stpnr, spannlängd och H som i Excel (urklipp, markering), resultat och kontrollerna 1–5 |
-| Beräkningar | `libs/calc` | Rena beräkningsfunktioner (normalspannet) och tabelltext (decimalkomma, tabbseparerat urklipp) |
+| Linberäkning | `src/windows/line_calc_dialog.*` | Formuläret Linberäkning som arket: Indata, Lindata/Konstanter och Lastfall med Resultat och Data till SAG, korsningsmallarna, lägena Ny och Excel med skillnadsmarkering, kopplad (indata ur Dokumentation) eller manuell |
+| PM Excel-arket | `src/windows/line_calc_info_dialog.*` | Visar PM:et om felen i Excel-arket (`res/linberakning_excel.md`), öppnas med i-knappen vid läget Ny |
+| Normalspann | `libs/anCalc` | Normalspannsberäkningen som rena funktioner |
+| Tabelltext | `libs/tableText` | Tal med decimalkomma, tabbseparerat urklipp och inklistring |
+| Linberäkning | `libs/lineCalc` | Arket Linberäkning (15 lastfall, Ei och Ep) och lastfallsmallarna som rena funktioner, i lägena Excel (som arket) och Ny (felen rättade) |
+| Excel-tabell | `libs/sheetGrid` | Excel-markering, urklipp och inklistring i en GlazeUI DataGrid med fast antal rader |
 | Linor | `libs/conductor` | Typen `Conductor`, validering och jämförelser, gemensam för systemdb och projectdb |
 | Version | `libs/version` | Programmets version som header och versionsresurs för kalkyl.exe |
 | Felmodell | `libs/core` | `Result<T>` och `Error`, som alla bibliotek använder |
 | Plattform | `libs/platform` | Text (UTF-8/UTF-16), system, filer, låsfil och filassociation (Win32) |
 | Databas | `libs/db` | SQLite-anslutning, satser och migrering |
 | Systemdatabas | `libs/systemdb` | Utseendeläge, senaste mapp, senaste projekt, linregistret och automatisk sparning, lokalt per användare |
-| Projektdatabas | `libs/projectdb` | Projektfilen `.kalkyl`: lokal arbetskopia, lås och säker publicering; Dokumentation, linkopior och normalspannsberäkningar (`project_data.*`) |
+| Projektdatabas | `libs/projectdb` | Projektfilen `.kalkyl`: lokal arbetskopia, lås och säker publicering; Dokumentation, linkopior, normalspanns- och linberäkningar och upplösningen av kopplade linberäkningar (`project_data.*`) |
 | Utseende | `libs/appearance` | Slate, temat Windows och lägesknappen, gemensamt för alla toppfönster |
-| Resurser | `res` | Programikonen (källa, `assets.bin`, `kalkyl.ico`) |
+| Resurser | `res` | Programikonen (källa, `assets.bin`, `kalkyl.ico`) och PM:et `linberakning_excel.md`, som byggs in i kalkyl.exe |
+| Tester | `tests` | Alla tester (ctest) och deras facit |
 | Installation | `installer` | setup.exe per användare (NSIS) |
 
 ## Teknik
@@ -51,7 +57,7 @@ cmake --build --preset debug
     Då rörs inte det vanliga bygget.
   - `installer` bygger setup.exe: `cmake --preset release && cmake --build --preset installer`.
     Resultatet är `build-release/installer/Kalkyl-<version>-setup.exe`.
-  - `test` bygger testerna (`KALKYL_TESTS=ON`) i `build-test/`. Kör dem med `ctest --preset test`.
+  - `test` bygger testerna i `tests/` (`KALKYL_TESTS=ON`) i `build-test/`. Kör dem med `ctest --preset test`.
 - Byter man generator i en befintlig byggkatalog måste hela katalogen tas bort, även `_deps/`.
 - Förhandsgranska ett fönster: `build-tools/_deps/glazeui-build/apps/glaze-render/glaze-render.exe src/windows/main_window.h -o bild.png`.
 
@@ -76,7 +82,8 @@ Strukturen är fast. Nya filer läggs där de hör hemma.
 | `src` | Programmet: bara `main.cpp` och `CMakeLists.txt` |
 | `src/windows` | Alla fönster och dialoger, tre filer per fönster |
 | `libs` | Stödbibliotek, en katalog per bibliotek (t.ex. systemdb, nätverk) |
-| `res` | Resurser som checkas in: programikonen och skriptet som ritar den |
+| `tests` | Alla tester och deras facit. Inga tester ligger bland källkoden i `src` eller `libs` |
+| `res` | Resurser som checkas in: programikonen, skriptet som ritar den och texter som byggs in i programmet (PM:et om Excel-arket) |
 | `installer` | Installationen: NSIS-skriptet, licenstexten och målet installer |
 
 ## Data
@@ -84,7 +91,8 @@ Strukturen är fast. Nya filer läggs där de hör hemma.
 - **Systemdatabasen** `system.db` ligger lokalt i `%LOCALAPPDATA%\Kalkyl` (eller `KALKYL_DATA_DIR`) och sparar utseendeläge, senaste mapp, senaste projekt, linregistret och intervallet för automatisk sparning. Linregistrets startdata (SWECO:s 129 linor ur Linberäkning.xlsm) ligger i `libs/systemdb/conductor_seed_v1.h`.
 - **Projekt** är en SQLite-fil med ändelsen `.kalkyl`, som kan ligga på en nätverksshare.
   Programmet kopierar den till en lokal arbetskopia vid öppning och skriver tillbaka den bara med atomär publicering (Ctrl+S eller automatisk sparning). En låsfil visar att projektet är öppet.
-  Projektet sparar Dokumentationens värden, en kopia av varje använd lina och normalspannsberäkningarna.
+  Projektet sparar Dokumentationens värden, en kopia av varje använd lina, normalspannsberäkningarna och linberäkningarna.
+  En kopplad linberäkning sparar inte linan, aₙ, σ₀, min och max, utan hämtar dem ur Dokumentation vid varje omräkning.
 - Avinstallationen rör aldrig systemdatabasen, arbetskopiorna eller projektfilerna.
 - `.kalkyl` associeras per användare med Kalkyl (`kalkyl.exe --registrera` och `--avregistrera`).
 - Detaljer, felmodell och API:er står i `doc/plans/archive/2026-11-20_Grunder.md`.
@@ -122,3 +130,8 @@ står i den globala `~/.claude/CLAUDE.md`. Här står bara det som är särskilt
 - **Byggkataloger:** huvudkatalogen är `build/` (presetet `debug`). Implementeringsagenternas egna kataloger
   konfigureras med `-DFETCHCONTENT_SOURCE_DIR_GLAZEUI=C:/Users/sehoer/Source/Kalkyl/build/_deps/glazeui-src`, så att GlazeUI inte klonas igen.
 - **Versionen** står bara i `project(VERSION ...)` i rotens `CMakeLists.txt`. setup.exe och versionsresursen i kalkyl.exe får versionen därifrån.
+- **Beräkningarna ska vara korrekta, och varje avsteg från Excel-underlaget dokumenteras.**
+  - En beräkning som återger ett Excel-ark har läget Excel, som räknar exakt som arket, och läget Ny, där felen är rättade.
+  - Varje avsteg beskrivs i ett PM i `res/` med vad Excel gör, vad Kalkyl gör och varför, kortfattat och utan exempel.
+  - PM:et visas i programmet med en i-knapp (`StockIcon::Information`) vid läget Ny.
+  - Ett nytt eller ändrat avsteg uppdaterar PM:et i samma ändring. Linberäkningens PM är `res/linberakning_excel.md`.

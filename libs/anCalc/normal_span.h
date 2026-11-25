@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace kalkyl::calc {
+namespace kalkyl::ancalc {
 
 // En stolpe i normalspannsberäkningen: en rad i formulärets tabell (Excel C-E).
 // lengthM är det horisontella spannet FÖRE stolpen; på första stolpen ingår det inte i summorna.
@@ -88,4 +88,4 @@ std::string ratioText(double ratio);
 std::string adjacentText(double adjacent);
 std::string localText(double local10, double an);
 
-} // namespace kalkyl::calc
+} // namespace kalkyl::ancalc

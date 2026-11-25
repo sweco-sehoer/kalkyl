@@ -1,12 +1,12 @@
-#include "calc/normal_span.h"
+#include "anCalc/normal_span.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 
-#include "calc/table_text.h"
+#include "tableText/table_text.h"
 
-namespace kalkyl::calc {
+namespace kalkyl::ancalc {
 
 namespace {
 
@@ -63,19 +63,20 @@ double roundTenth(double value)
 // Kontroll 1 och 2: kvoten med två decimaler.
 std::string ratioText(double ratio)
 {
-    return formatDecimal(ratio, 2);
+    return tabletext::formatDecimal(ratio, 2);
 }
 
 // Kontroll 3: "1 : q" med q avrundat till 0,1.
 std::string adjacentText(double adjacent)
 {
-    return "1 : " + formatDecimal(roundTenth(adjacent));
+    return "1 : " + tabletext::formatDecimal(roundTenth(adjacent));
 }
 
 // Kontroll 4 och 5: an,10 avrundat till heltal och kvoten mot an med två decimaler.
 std::string localText(double local10, double an)
 {
-    return formatDecimal(std::round(local10)) + " / " + formatDecimal(std::round(local10 / an * 100.0) / 100.0);
+    return tabletext::formatDecimal(std::round(local10)) + " / " +
+           tabletext::formatDecimal(std::round(local10 / an * 100.0) / 100.0);
 }
 
 // Räknar normalspannet och kontrollerna 1-5. Först valideras gränser och indata och alla
@@ -191,4 +192,4 @@ SpanCalculation calculateNormalSpan(const std::vector<SpanPole>& poles, const Sp
     return out;
 }
 
-} // namespace kalkyl::calc
+} // namespace kalkyl::ancalc

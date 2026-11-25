@@ -1,0 +1,37 @@
+// GENERERAD av GlazeBuilder — redigera i GlazeBuilder, inte här.
+// glazeui-design: ui=Slate theme=slate(Windows) style=0 lang=sv
+#include "line_calc_info_dialog.h"
+
+LineCalcInfoDialog::LineCalcInfoDialog() { initializeComponent(); }
+
+void LineCalcInfoDialog::initializeComponent()
+{
+    setTitle("Linberäkningen och Excel-arket");
+    setContentSize(760, 720);
+    setMinimumContentSize(480, 360);
+    setStartPosition(glaze::StartPosition::CenterOwner);
+    setModal(true);
+    setAcceptButton(closeBtn);
+    setCancelButton(closeBtn);
+
+    closeBtn.name = "closeBtn";
+    closeBtn.setText("Stäng");
+    closeBtn.setDialogResult(glaze::DialogResult::OK);
+    closeBtn.width = 96;
+    closeBtn.anchors = {false, false, true, true};
+    closeBtn.right = 16;
+    closeBtn.bottom = 16;
+
+    docView.name = "docView";
+    docView.setBorder(true);
+    docView.x = 16;
+    docView.y = 16;
+    docView.anchors = {true, true, true, true};
+    docView.right = 16;
+    docView.bottom = 64;
+
+    glaze::AppWindow::onLoad = [this](glaze::Widget* s, glaze::EventArgs& e) { onLoad(s, e); };
+
+    root().adopt(closeBtn);
+    root().adopt(docView);
+}
