@@ -98,16 +98,17 @@ const ByggPmRowDef kByggPmRows[] = {
     {"Normalspann topplina höger", nullptr, &kGreen, Side::Right, Unit::Meter, "normal_span_top_right", "", std::nullopt, std::nullopt},
     {"Max temp", nullptr, &kAmber, Side::Both, Unit::Celsius, "temp_max", "", std::nullopt, std::nullopt},
     {"Min temp", nullptr, &kAmber, Side::Both, Unit::Celsius, "temp_min", "", std::nullopt, std::nullopt},
-    // Beräkningarna: normalspannsberäkning och linberäkning i par. Före ombyggnad är lila och
-    // efter ombyggnad rosa. Med egen topplina höger kommer vänster-paret före höger-paret.
+    // Beräkningarna: normalspannsberäkning och linberäkning i par. Först alla före ombyggnad
+    // (lila), sedan alla efter ombyggnad (rosa). I varje del kommer faslinan först och sedan
+    // topplinorna; med egen topplina höger kommer vänster-paret före höger-paret.
     {"Faslina normalspannsberäkning före ombyggnad", nullptr, &kPurple, Side::Both, Unit::Meter, nullptr, "", Ns{Wire::Phase, Stage::Before}, std::nullopt},
     {"Faslina linberäkning före ombyggnad", nullptr, &kPurple, Side::Both, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::Phase, Stage::Before}},
-    {"Faslina normalspannsberäkning efter ombyggnad", nullptr, &kRose, Side::Both, Unit::Meter, nullptr, "", Ns{Wire::Phase, Stage::After}, std::nullopt},
-    {"Faslina linberäkning efter ombyggnad", nullptr, &kRose, Side::Both, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::Phase, Stage::After}},
     {"Topplina vänster normalspannsberäkning före ombyggnad", "Topplinor normalspannsberäkning före ombyggnad", &kPurple, Side::Left, Unit::Meter, nullptr, "", Ns{Wire::TopLeft, Stage::Before}, std::nullopt},
     {"Topplina vänster linberäkning före ombyggnad", "Topplinor linberäkning före ombyggnad", &kPurple, Side::Left, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::TopLeft, Stage::Before}},
     {"Topplina höger normalspannsberäkning före ombyggnad", nullptr, &kPurple, Side::Right, Unit::Meter, nullptr, "", Ns{Wire::TopRight, Stage::Before}, std::nullopt},
     {"Topplina höger linberäkning före ombyggnad", nullptr, &kPurple, Side::Right, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::TopRight, Stage::Before}},
+    {"Faslina normalspannsberäkning efter ombyggnad", nullptr, &kRose, Side::Both, Unit::Meter, nullptr, "", Ns{Wire::Phase, Stage::After}, std::nullopt},
+    {"Faslina linberäkning efter ombyggnad", nullptr, &kRose, Side::Both, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::Phase, Stage::After}},
     {"Topplina vänster normalspannsberäkning efter ombyggnad", "Topplinor normalspannsberäkning efter ombyggnad", &kRose, Side::Left, Unit::Meter, nullptr, "", Ns{Wire::TopLeft, Stage::After}, std::nullopt},
     {"Topplina vänster linberäkning efter ombyggnad", "Topplinor linberäkning efter ombyggnad", &kRose, Side::Left, Unit::Mall, nullptr, "", std::nullopt, Ns{Wire::TopLeft, Stage::After}},
     {"Topplina höger normalspannsberäkning efter ombyggnad", nullptr, &kRose, Side::Right, Unit::Meter, nullptr, "", Ns{Wire::TopRight, Stage::After}, std::nullopt},
