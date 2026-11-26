@@ -1,5 +1,6 @@
 #include "main_window.h"
 
+#include "about_dialog.h"
 #include "conductor_dialog.h"
 #include "line_calc_dialog.h"
 #include "normal_span_dialog.h"
@@ -1954,11 +1955,9 @@ void MainWindow::exitClicked()
     close();
 }
 
-// Hjälp > Om Kalkyl: visar programmets namn och version.
-// Rutan är GlazeUI:s egen meddelanderuta.
+// Hjälp > Om Kalkyl: öppnar AboutDialog med ikonen, versionen, underlaget och copyright.
 void MainWindow::aboutClicked()
 {
-    glaze::messageBox(*this,
-                      std::string("Kalkyl ") + KALKYL_VERSION + kNl + "Luftledningsberäkningar",
-                      "Om Kalkyl");
+    AboutDialog dlg;
+    dlg.run(*this);
 }

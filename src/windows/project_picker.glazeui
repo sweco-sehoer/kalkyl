@@ -15,6 +15,13 @@ void ProjectPicker::initializeComponent()
     appIcon.setIcon(glaze::img("app", "kalkyl"));
     appIcon.setSmallIcon(glaze::img("app32", "kalkyl"));
 
+    menuBar.setInTitleBar(true);
+    menuBar.show();
+    menuBar.addMenu("Arkiv");
+    menuBar.addItem("Arkiv", "Avsluta", "Alt+F4");
+    menuBar.addMenu("Hjälp");
+    menuBar.addItem("Hjälp", "Om Kalkyl");
+
     statusBar.show();
     statusBar.addPanel("", 0, true);
 

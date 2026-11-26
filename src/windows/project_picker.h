@@ -56,6 +56,13 @@ private:
     // Läget sparas i systemdatabasen.
     void themeBtnClicked(glaze::Widget* sender, glaze::ClickArgs& e);
 
+    // Arkiv > Avsluta: stänger väljaren utan projekt, som krysset.
+    // main avslutar då programmet.
+    void exitClicked();
+
+    // Hjälp > Om Kalkyl: öppnar Om-rutan (AboutDialog).
+    void aboutClicked();
+
     // Nytt projekt: väljer filnamn och plats med filväljaren.
     // Projektet skapas sedan i bakgrunden.
     void newBtnClicked(glaze::Widget* sender, glaze::ClickArgs& e);

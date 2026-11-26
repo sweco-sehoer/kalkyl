@@ -8,11 +8,12 @@ Fönstren ligger i `src/windows/`, stödbiblioteken i `libs/`.
 
 | Del | Katalog | Innehåll |
 |---|---|---|
-| Projektväljare | `src/windows/project_picker.*` | Startfönstret: de 10 senaste projekten, Öppna, Öppna annat projekt…, Nytt projekt… och Ta bort ur listan |
+| Projektväljare | `src/windows/project_picker.*` | Startfönstret: de 10 senaste projekten, Öppna, Öppna annat projekt…, Nytt projekt… och Ta bort ur listan, menyerna Arkiv > Avsluta och Hjälp > Om Kalkyl i namnlisten |
 | Huvudfönster | `src/windows/main_window.*` | Programikon (stor med verktygsfält), menyer och lägesknapp i namnlisten, flikarna Dokumentation (uppgifter enligt ByggPM i blått, grönt och gult, beräkningar före i lila och efter i rosa; fas- och topplina kopieras ur linregistret till projektet; högerklick på normalspanns- och linberäkningsraderna; ett nytt projekt får förval), Stolptabell före, Normalspann och Linberäkning (alla beräkningar, även lösa), Arkiv > Spara (Ctrl+S), automatisk sparning och statusrad |
 | Lindata | `src/windows/conductor_dialog.*` | Inställningar > Lindata…: redigera linregistret (lägg till, ta bort, återställ startdata) |
 | Normalspann | `src/windows/normal_span_dialog.*` | Formuläret Normalspannsberäkning enligt Normalspannberäkning.xlsm: tabell med Stpnr, spannlängd och H som i Excel (urklipp, markering), resultat och kontrollerna 1–5 |
 | Linberäkning | `src/windows/line_calc_dialog.*` | Formuläret Linberäkning som arket: Indata, Lindata/Konstanter och Lastfall med Resultat och Data till SAG, korsningsmallarna, lägena Ny och Excel med skillnadsmarkering, kopplad (indata ur Dokumentation) eller manuell |
+| Om Kalkyl | `src/windows/about_dialog.*` | Hjälp > Om Kalkyl: programikonen i stort format, version, underlaget för beräkningarna, utvecklaren och copyright |
 | PM Excel-arket | `src/windows/line_calc_info_dialog.*` | Visar PM:et om felen i Excel-arket (`res/linberakning_excel.md`), öppnas med i-knappen vid läget Ny |
 | Normalspann | `libs/anCalc` | Normalspannsberäkningen som rena funktioner |
 | Tabelltext | `libs/tableText` | Tal med decimalkomma, tabbseparerat urklipp och inklistring |

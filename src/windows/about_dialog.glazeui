@@ -1,0 +1,84 @@
+// GENERERAD av GlazeBuilder — redigera i GlazeBuilder, inte här.
+// glazeui-design: ui=Slate theme=slate(Windows) style=0 lang=sv
+#include "about_dialog.h"
+
+AboutDialog::AboutDialog() { initializeComponent(); }
+
+void AboutDialog::initializeComponent()
+{
+    setTitle("Om Kalkyl");
+    setContentSize(560, 296);
+    setMinimumContentSize(560, 296);
+    setStartPosition(glaze::StartPosition::CenterOwner);
+    setModal(true);
+    setMinimizeBox(false);
+    setMaximizeBox(false);
+    setAcceptButton(closeBtn);
+    setCancelButton(closeBtn);
+
+    appIcon.setIcon(glaze::img("app", "kalkyl"));
+    appIcon.setSmallIcon(glaze::img("app32", "kalkyl"));
+
+    iconPic.name = "iconPic";
+    iconPic.setImg(glaze::img("app", "kalkyl"));
+    iconPic.x = 24;
+    iconPic.y = 24;
+    iconPic.width = 160;
+    iconPic.height = 160;
+
+    nameLbl.name = "nameLbl";
+    nameLbl.setText("Kalkyl");
+    nameLbl.setRole(glaze::Label::Role::Heading);
+    nameLbl.x = 208;
+    nameLbl.y = 24;
+
+    versionLbl.name = "versionLbl";
+    versionLbl.setText("Version");
+    versionLbl.setRole(glaze::Label::Role::Dim);
+    versionLbl.x = 208;
+    versionLbl.anchorTop = {"nameLbl", 4};
+
+    descLbl.name = "descLbl";
+    descLbl.setText("Luftledningsberäkningar");
+    descLbl.x = 208;
+    descLbl.anchorTop = {"versionLbl", 16};
+
+    basisLbl.name = "basisLbl";
+    basisLbl.setText("Beräkningarna bygger på Excel-underlag av Andreas Ståhlfors, SWECO.");
+    basisLbl.setWrap(true);
+    basisLbl.x = 208;
+    basisLbl.width = 328;
+    basisLbl.anchorTop = {"descLbl", 16};
+
+    devLbl.name = "devLbl";
+    devLbl.setText("Utvecklat av Erik Holmbom med hjälp av agentic coding, Claude Opus 5.5.");
+    devLbl.setWrap(true);
+    devLbl.x = 208;
+    devLbl.width = 328;
+    devLbl.anchorTop = {"basisLbl", 8};
+
+    copyLbl.name = "copyLbl";
+    copyLbl.setText("Copyright © SWECO Sverige AB");
+    copyLbl.setRole(glaze::Label::Role::Dim);
+    copyLbl.x = 208;
+    copyLbl.anchorTop = {"devLbl", 16};
+
+    closeBtn.name = "closeBtn";
+    closeBtn.setText("Stäng");
+    closeBtn.setDialogResult(glaze::DialogResult::OK);
+    closeBtn.width = 96;
+    closeBtn.anchors = {false, false, true, true};
+    closeBtn.right = 16;
+    closeBtn.bottom = 16;
+
+    glaze::AppWindow::onLoad = [this](glaze::Widget* s, glaze::EventArgs& e) { onLoad(s, e); };
+
+    root().adopt(iconPic);
+    root().adopt(nameLbl);
+    root().adopt(versionLbl);
+    root().adopt(descLbl);
+    root().adopt(basisLbl);
+    root().adopt(devLbl);
+    root().adopt(copyLbl);
+    root().adopt(closeBtn);
+}

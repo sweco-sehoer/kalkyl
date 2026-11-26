@@ -1,5 +1,6 @@
 #include "project_picker.h"
 
+#include "about_dialog.h"
 #include "appearance/appearance.h"
 #include "platform/files.h"
 #include "platform/system.h"
@@ -77,6 +78,9 @@ void ProjectPicker::onLoad(glaze::Widget*, glaze::EventArgs&)
     kalkyl::appearance::syncButton(themeBtn, themeMode());
     setTitle(std::string("Kalkyl ") + KALKYL_VERSION);
 
+    menuBar.setHandler({"Arkiv", "Avsluta"}, [this] { exitClicked(); });
+    menuBar.setHandler({"Hjälp", "Om Kalkyl"}, [this] { aboutClicked(); });
+
     if (!sys_->isPersistent())
         statusIdle_ = "Inställningar sparas inte: " + singleLine(sys_->fallbackReason());
     statusBar.setPanelText(0, statusIdle_);
@@ -95,6 +99,20 @@ void ProjectPicker::onLoad(glaze::Widget*, glaze::EventArgs&)
 void ProjectPicker::themeBtnClicked(glaze::Widget*, glaze::ClickArgs&)
 {
     kalkyl::appearance::cycle(*this, themeBtn, *sys_);
+}
+
+// Arkiv > Avsluta: stänger väljaren utan projekt, precis som krysset.
+// Ett pågående jobb väntas ut av fönstrets workers när fönstret rivs.
+void ProjectPicker::exitClicked()
+{
+    close();
+}
+
+// Hjälp > Om Kalkyl: visar Om-rutan som modal dialog över väljaren.
+void ProjectPicker::aboutClicked()
+{
+    AboutDialog dlg;
+    dlg.run(*this);
 }
 
 // Nytt projekt: filväljaren i sparläge föreslår namn och mapp.

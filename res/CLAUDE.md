@@ -1,12 +1,13 @@
 # res
 
-Programikonen: ett vitt kraftledningstorn med ledare i bärnsten på en blå platta, och texter som byggs in i programmet.
+Programikonen och texter som byggs in i programmet. Ikonen visar tre mörka fackverksstolpar i perspektiv mot en kvällshimmel över grön mark.
+Ledningen vinklar vid mittstolpen, och varje stolpes sex linor går till samma fästpunkt på nästa stolpe.
 Bygget genererar ingenting här. Filerna nedan checkas in och kopieras eller läses bara av bygget.
 
 | Fil | Innehåll | Checkas in |
 |---|---|---|
 | `linberakning_excel.md` | PM:et om linberäkningen och felen i Excel-arket (D1–D10, avsteg och skäl). Byggs in i `kalkyl.exe` av `src/CMakeLists.txt` och visas med i-knappen i formuläret Linberäkning. Får inte innehålla `)md"` eller `@` | ja |
-| `rita_ikon.ps1` | Ikonens källa. Ritar tornet med System.Drawing (GDI+) och skriver `ikon-256.png` och `ikon-32.png` | ja |
+| `rita_ikon.ps1` | Ikonens källa. Ritar stolparna med System.Drawing (GDI+) och skriver `ikon-256.png` och `ikon-32.png`. 32 px utelämnar fackverket och tonar linorna | ja |
 | `assets.txt` | Manifest för `glazeassets pack`: listorna `app` (256 px) och `app32` (32 px), nyckeln `kalkyl` | ja |
 | `assets.bin` | Bilderna som fönstret och `appIcon` läser. Kopieras till `kalkyl.exe`:s katalog | ja |
 | `kalkyl.ico` | Programfilens ikon (windres via `glaze_app_icon`) och ikon för `.kalkyl`-filer | ja |
