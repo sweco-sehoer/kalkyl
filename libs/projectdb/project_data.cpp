@@ -1507,4 +1507,65 @@ Result<void> removeLineCalc(ProjectDb& p, std::int64_t id)
     });
 }
 
+// Läser Stolptabell före i tabellens ordning. NULL i en talkolumn blir tom text.
+Result<std::vector<poletable::PoleRow>> polesBefore(ProjectDb& p)
+{
+    auto stmt = prepared(p.local(), R"sql(
+SELECT pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl FROM pole_before ORDER BY position
+)sql",
+                         {});
+    if (!stmt)
+        return stmt.error();
+    std::vector<poletable::PoleRow> rows;
+    while (true) {
+        auto step = stmt.value().step();
+        if (!step)
+            return step.error();
+        if (!step.value())
+            break;
+        poletable::PoleRow row;
+        for (int column = 0; column < poletable::kColumnCount; ++column)
+            poletable::field(row, column) = stmt.value().text(column);
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+// Ersätter hela Stolptabell före i en transaktion. Talen valideras först, och en tom rad sist
+// sparas inte. Tomma tal binds som NULL.
+Result<void> setPolesBefore(ProjectDb& p, const std::vector<poletable::PoleRow>& rows)
+{
+    return write(p, [&](db::Database& d) -> Result<void> {
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            if (const auto bad = poletable::firstInvalidColumn(rows[i]))
+                return makeError(ErrorCode::Invalid,
+                                 "Stolptabellen har ett ogiltigt tal på rad " + std::to_string(i + 1) +
+                                     " i kolumnen " + poletable::columnName(*bad) + ".");
+        }
+        if (auto r = run(d, "DELETE FROM pole_before", {}); !r)
+            return r;
+        const std::vector<poletable::PoleRow> toSave = poletable::rowsToSave(rows);
+        std::int64_t position = 0;
+        for (const poletable::PoleRow& row : toSave) {
+            // Tom text i en talkolumn blir NULL, text i textkolumnerna sparas som den är.
+            const auto number = [&](int column) -> Arg {
+                const std::string& text = poletable::field(row, column);
+                return text.empty() ? Arg{nullptr} : Arg{std::string_view(text)};
+            };
+            if (auto r = run(d, R"sql(
+INSERT INTO pole_before(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl)
+VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+)sql",
+                             {position, std::string_view(row.pole), number(poletable::kAv),
+                              number(poletable::kAh), number(poletable::kSpan),
+                              number(poletable::kNorth), number(poletable::kEast),
+                              number(poletable::kHeight), std::string_view(row.lkl)});
+                !r)
+                return r;
+            ++position;
+        }
+        return Result<void>{};
+    });
+}
+
 } // namespace kalkyl::projectdb

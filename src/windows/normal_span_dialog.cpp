@@ -79,23 +79,7 @@ int columnOf(ancalc::SpanColumn column)
 // Talet med decimalkomma och hårda mellanslag som tusentalsavgränsare, till resultatpanelen.
 std::string groupedText(double value, int decimals)
 {
-    std::string s = tabletext::formatDecimal(value, decimals);
-    const std::string nbsp{static_cast<char>(0xC2), static_cast<char>(0xA0)};
-    const std::size_t signEnd = (!s.empty() && s[0] == '-') ? 1 : 0;
-    std::size_t intEnd = s.find(',');
-    if (intEnd == std::string::npos)
-        intEnd = s.size();
-    std::string out = s.substr(intEnd);
-    int digits = 0;
-    for (std::size_t i = intEnd; i > signEnd; --i) {
-        if (digits > 0 && digits % 3 == 0)
-            out.insert(0, nbsp);
-        out.insert(out.begin(), s[i - 1]);
-        ++digits;
-    }
-    if (signEnd == 1)
-        out.insert(out.begin(), '-');
-    return out;
+    return tabletext::formatDecimalText(tabletext::formatDecimal(value, decimals, '.'), ',', true);
 }
 
 // Antalet avvikelser som text, eller ett streck när ingen beräkning finns.

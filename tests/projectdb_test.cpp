@@ -22,6 +22,7 @@
 #include "platform/lock_file.h"
 #include "platform/system.h"
 #include "platform/text.h"
+#include "poleTable/pole_table.h"
 #include "projectdb/dev_migration.h"
 #include "projectdb/project_data.h"
 #include "projectdb/project_db.h"
@@ -516,21 +517,22 @@ bool publishNow(projectdb::ProjectDb& p)
     return true;
 }
 
-// SQL-frågan som räknar de nio tabellerna i schemat.
-const char* const kNineTablesSql =
+// SQL-frågan som räknar de tio tabellerna i schemat.
+const char* const kTenTablesSql =
     "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('project', "
     "'project_conductor', 'doc_value', 'normal_span', 'normal_span_pole', 'doc_normal_span', "
-    "'line_calc', 'line_calc_case', 'doc_line_calc')";
+    "'line_calc', 'line_calc_case', 'doc_line_calc', 'pole_before')";
 
-// Ett nytt projekt har alla nio tabellerna i schemat.
+// Ett nytt projekt har alla tio tabellerna i schemat.
 void testSchemaTables()
 {
     auto created = projectdb::ProjectDb::create(join(g_share, "Tabeller.kalkyl"), "Tabeller", options());
     CHECK(created.ok());
     if (!created.ok())
         return;
-    CHECK(countIn(created.value(), kNineTablesSql) == 9);
-    CHECK(countIn(created.value(), "PRAGMA user_version") == 3);
+    CHECK(countIn(created.value(), kTenTablesSql) == 10);
+    CHECK(countIn(created.value(), "PRAGMA user_version") == projectdb::kSchemaVersion);
+    CHECK(projectdb::kSchemaVersion == 4);
 }
 
 // Skapar en projektfil med bara tabellen project, som i v0.1.0, och angiven user_version.
@@ -571,7 +573,7 @@ void testMigrateFromV010()
         CHECK(p.info().createdUtc == "2026-11-23T12:00:00Z");
         CHECK(p.info().createdWith == "Kalkyl 0.1.0");
         CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
-        CHECK(countIn(p, kNineTablesSql) == 9);
+        CHECK(countIn(p, kTenTablesSql) == 10);
         CHECK(projectdb::setDocValue(p, {"temp_max", "45", "Migrerad"}).ok());
         CHECK(publishNow(p));
         p.close();
@@ -1186,8 +1188,8 @@ void checkV020Data(projectdb::ProjectDb& p)
     }
 }
 
-// Ett projekt som v0.2.0 hade det migreras till steg 3: allt gammalt finns kvar, de nya delarna
-// fungerar, och originalet har user_version 3 efter publicering och ny öppning.
+// Ett projekt som v0.2.0 hade det migreras till det senaste steget: allt gammalt finns kvar, de
+// nya delarna fungerar, och originalet har det nya user_version efter publicering och ny öppning.
 void testMigrateFromV020()
 {
     const std::string path = join(g_share, "Från 0.2.0.kalkyl");
@@ -1202,8 +1204,8 @@ void testMigrateFromV020()
             return;
         }
         projectdb::ProjectDb& p = opened.value();
-        CHECK(countIn(p, "PRAGMA user_version") == 3);
-        CHECK(countIn(p, kNineTablesSql) == 9);
+        CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
+        CHECK(countIn(p, kTenTablesSql) == 10);
         checkV020Data(p);
 
         auto none = projectdb::lineCalcs(p);
@@ -1220,7 +1222,7 @@ void testMigrateFromV020()
         CHECK(publishNow(p));
         p.close();
     }
-    CHECK(scalar(path, "PRAGMA user_version") == 3);
+    CHECK(scalar(path, "PRAGMA user_version") == projectdb::kSchemaVersion);
     CHECK(scalar(path, "SELECT count(*) FROM project WHERE name = 'åäö-v020'") == 1);
     auto reopened = projectdb::ProjectDb::open(path, options());
     CHECK(reopened.ok());
@@ -1230,6 +1232,225 @@ void testMigrateFromV020()
     const projectdb::LineCalc back = readCalc(reopened.value(), savedId);
     checkSameInput(back.input, t1Input(linecalc::CalcMode::Excel));
     CHECK(back.docKeys.size() == 1 && back.docKeys[0] == "line_calc_phase_after");
+}
+
+// ---- Stolptabell före ----
+
+// En rad i stolptabellen med de åtta fälten i tabellens ordning.
+poletable::PoleRow poleRow(const char* pole, const char* av, const char* ah, const char* span,
+                           const char* north, const char* east, const char* height, const char* lkl)
+{
+    poletable::PoleRow row;
+    row.pole = pole;
+    row.av = av;
+    row.ah = ah;
+    row.spanM = span;
+    row.north = north;
+    row.east = east;
+    row.height = height;
+    row.lkl = lkl;
+    return row;
+}
+
+// Tre stolpar med tio decimaler i Koordinat N, 44.10 med avslutande nolla, negativt tal, noll,
+// tomma tal och text med åäö. Raderna har ingen tom rad.
+std::vector<poletable::PoleRow> tenDecimalRows()
+{
+    return {poleRow("ST0378", "363", "362", "348", "6512240.8500000000", "412181.98", "44.19", "255/262"),
+            poleRow("Åkerö-ÄÖ", "", "-12.5", "0", "", "", "", ""),
+            poleRow("ST0381", "44.10", "", "", "6511247.0800000000", "411804.35", "30.01", "262/262")};
+}
+
+// Sparar och läser tillbaka Stolptabell före: en ny tabell är tom, alla fält kommer tillbaka
+// exakt, tomma rader mitt i finns kvar och tomma rader sist är borta, talen lagras som text,
+// tomma tal som NULL, och en ny sparning ersätter allt.
+void testPoleTableRoundTrip()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Stolptabell", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+
+    auto none = projectdb::polesBefore(p);
+    CHECK(none.ok() && none.value().empty());
+
+    std::vector<poletable::PoleRow> rows = tenDecimalRows();
+    rows.insert(rows.begin() + 2, poletable::PoleRow{});   // tom rad mitt i
+    rows.push_back({});                                    // två tomma rader sist
+    rows.push_back({});
+    CHECK(projectdb::setPolesBefore(p, rows).ok());
+
+    auto back = projectdb::polesBefore(p);
+    CHECK(back.ok());
+    if (back.ok()) {
+        const std::vector<poletable::PoleRow> expected = {rows[0], rows[1], rows[2], rows[3]};
+        CHECK(back.value().size() == 4);
+        CHECK(back.value() == expected);
+        if (back.value().size() == 4) {
+            CHECK(poletable::isEmptyRow(back.value()[2]));
+            CHECK(back.value()[0].north == "6512240.8500000000");
+            CHECK(back.value()[1].pole == "Åkerö-ÄÖ" && back.value()[1].ah == "-12.5");
+            CHECK(back.value()[1].spanM == "0");
+            CHECK(back.value()[3].av == "44.10");
+        }
+    }
+    CHECK(countIn(p, "SELECT count(*) FROM pole_before") == 4);
+    CHECK(countIn(p, "SELECT max(position) FROM pole_before") == 3);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_before WHERE position = 0 AND "
+                     "coord_n = '6512240.8500000000' AND typeof(coord_n) = 'text'") == 1);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_before WHERE position = 1 AND "
+                     "typeof(span_m) = 'text' AND span_m = '0' AND typeof(coord_n) = 'null'") == 1);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_before WHERE position = 3 AND av = '44.10' AND "
+                     "typeof(av) = 'text' AND typeof(ah) = 'null'") == 1);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_before WHERE position = 2 AND pole = '' AND lkl = '' AND "
+                     "av IS NULL AND ah IS NULL AND span_m IS NULL AND coord_n IS NULL AND "
+                     "coord_e IS NULL AND coord_h IS NULL") == 1);
+
+    // Publicering, stängning och ny öppning bevarar tabellen.
+    CHECK(publishNow(p));
+    const std::string path = p.path();
+    p.close();
+    auto reopened = projectdb::ProjectDb::open(path, options());
+    CHECK(reopened.ok());
+    if (reopened.ok()) {
+        auto again = projectdb::polesBefore(reopened.value());
+        CHECK(again.ok() && again.value().size() == 4);
+        if (again.ok() && back.ok())
+            CHECK(again.value() == back.value());
+
+        // En ny sparning ersätter allt, och en tom lista tömmer tabellen.
+        CHECK(projectdb::setPolesBefore(reopened.value(), {poleRow("ny", "1", "", "", "", "", "", "")}).ok());
+        auto replaced = projectdb::polesBefore(reopened.value());
+        CHECK(replaced.ok() && replaced.value().size() == 1 && replaced.value()[0].pole == "ny");
+        CHECK(countIn(reopened.value(), "SELECT count(*) FROM pole_before") == 1);
+        CHECK(projectdb::setPolesBefore(reopened.value(), {}).ok());
+        CHECK(countIn(reopened.value(), "SELECT count(*) FROM pole_before") == 0);
+        // Bara tomma rader sparas inte heller.
+        CHECK(projectdb::setPolesBefore(reopened.value(), {poletable::PoleRow{}, poletable::PoleRow{}}).ok());
+        CHECK(countIn(reopened.value(), "SELECT count(*) FROM pole_before") == 0);
+    }
+}
+
+// Skapar projektfilen som v0.3.2 hade den: steg 1 till 3, user_version 3 och uppgifter i alla
+// tabeller. Namnet är åäö-v030. Linberäkningen är manuell med förvalen för alla fält utom
+// anteckningen, och normalspannet är kopplat till en rad.
+bool writeV030Project(const std::string& path)
+{
+    db::OpenOptions o;
+    o.mode = db::OpenMode::CreateNew;
+    auto d = db::Database::open(path, o);
+    CHECK(d.ok());
+    if (!d.ok())
+        return false;
+    const std::string head =
+        "PRAGMA application_id = " + std::to_string(projectdb::kApplicationId) +
+        "; PRAGMA user_version = 3; "
+        "CREATE TABLE project (id INTEGER PRIMARY KEY CHECK (id = 1), name TEXT NOT NULL, "
+        "created_utc TEXT NOT NULL, created_with TEXT NOT NULL); ";
+    bool ok = d.value().exec(head).ok();
+    ok = ok && d.value().exec(std::string(projectdb::dev::kStep2)).ok();
+    ok = ok && d.value().exec(std::string(projectdb::dev::kStep3)).ok();
+    const std::string data = R"sql(
+INSERT INTO project VALUES (1, 'åäö-v030', '2026-11-26T12:00:00Z', 'Kalkyl 0.3.2');
+INSERT INTO doc_value(key, value, reference) VALUES
+    ('tension_phase', '90', 'Ref åäö'),
+    ('temp_max', '50', '');
+INSERT INTO normal_span(id, note, limit_longest, limit_shortest, limit_adjacent, limit_local_min,
+                        limit_local_max, created_utc, modified_utc)
+VALUES (1, 'Exempel C åäö', 1.6, 0.4, 2.2, 0.9, 1.2, '2026-11-26T12:00:00Z', '2026-11-26T12:00:00Z');
+INSERT INTO normal_span_pole(span_id, position, pole, length_m, height_m) VALUES
+    (1, 0, 'P0', 250, 10), (1, 1, 'P1', 300, 20), (1, 2, 'P2', 200, 15), (1, 3, 'P3', 400, 30);
+INSERT INTO doc_normal_span(doc_key, span_id) VALUES ('ns_calc_phase_before', 1);
+INSERT INTO line_calc(id, note, created_utc, modified_utc)
+VALUES (1, 'Linberäkning åäö', '2026-11-26T12:00:00Z', '2026-11-26T12:00:00Z');
+WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 15)
+INSERT INTO line_calc_case(calc_id, case_id) SELECT 1, i FROM n;
+INSERT INTO doc_line_calc(doc_key, calc_id) VALUES ('line_calc_phase_after', 1);
+)sql";
+    ok = ok && d.value().exec(data).ok();
+    CHECK(ok);
+    return ok;
+}
+
+// Kontrollerar att allt som v0.3.2-filen innehöll finns kvar i det öppnade projektet.
+void checkV030Data(projectdb::ProjectDb& p)
+{
+    CHECK(p.info().name == "åäö-v030");
+    CHECK(p.info().createdWith == "Kalkyl 0.3.2");
+    auto values = projectdb::docValues(p);
+    CHECK(values.ok() && values.value().size() == 2);
+    if (values.ok()) {
+        for (const auto& v : values.value()) {
+            if (v.key == "tension_phase")
+                CHECK(v.value == "90" && v.reference == "Ref åäö");
+            else if (v.key == "temp_max")
+                CHECK(v.value == "50");
+            else
+                CHECK(false);
+        }
+    }
+    auto spans = projectdb::normalSpans(p);
+    CHECK(spans.ok() && spans.value().size() == 1);
+    if (spans.ok() && spans.value().size() == 1) {
+        const projectdb::NormalSpan& ns = spans.value()[0];
+        CHECK(ns.note == "Exempel C åäö");
+        CHECK(ns.poles.size() == 4);
+        CHECK(ns.limits.longest == 1.6 && ns.limits.shortest == 0.4 && ns.limits.adjacent == 2.2);
+        CHECK(ns.limits.localMin == 0.9 && ns.limits.localMax == 1.2);
+        CHECK(ns.docKeys.size() == 1 && ns.docKeys[0] == "ns_calc_phase_before");
+    }
+    auto calcs = projectdb::lineCalcs(p);
+    CHECK(calcs.ok() && calcs.value().size() == 1);
+    if (calcs.ok() && calcs.value().size() == 1) {
+        const projectdb::LineCalc& lc = calcs.value()[0];
+        CHECK(lc.id == 1 && lc.note == "Linberäkning åäö");
+        CHECK(lc.docSource.empty());
+        CHECK(lc.input.mode == linecalc::CalcMode::New);
+        CHECK(!lc.input.conductor.has_value());
+        CHECK(lc.input.constants.pi == 3.1416);
+        CHECK(lc.docKeys.size() == 1 && lc.docKeys[0] == "line_calc_phase_after");
+    }
+    CHECK(countIn(p, "SELECT count(*) FROM line_calc_case") == 15);
+}
+
+// Ett projekt som v0.3.2 hade det migreras till steg 4: allt gammalt finns kvar, Stolptabell före
+// är tom och fungerar, och tabellen med tio decimaler finns kvar efter publicering och ny öppning.
+void testMigrateFromV030()
+{
+    const std::string path = join(g_share, "Från 0.3.0.kalkyl");
+    if (!writeV030Project(path))
+        return;
+    {
+        auto opened = projectdb::ProjectDb::open(path, options());
+        CHECK(opened.ok());
+        if (!opened.ok()) {
+            std::cerr << opened.error().message << " / " << opened.error().detail << std::endl;
+            return;
+        }
+        projectdb::ProjectDb& p = opened.value();
+        CHECK(countIn(p, "PRAGMA user_version") == 4);
+        CHECK(countIn(p, kTenTablesSql) == 10);
+        checkV030Data(p);
+        auto none = projectdb::polesBefore(p);
+        CHECK(none.ok() && none.value().empty());
+        CHECK(projectdb::setPolesBefore(p, tenDecimalRows()).ok());
+        auto back = projectdb::polesBefore(p);
+        CHECK(back.ok() && back.value() == tenDecimalRows());
+        CHECK(publishNow(p));
+        p.close();
+    }
+    CHECK(scalar(path, "PRAGMA user_version") == 4);
+    CHECK(scalar(path, "SELECT count(*) FROM project WHERE name = 'åäö-v030'") == 1);
+    CHECK(scalar(path, "SELECT count(*) FROM pole_before") == 3);
+    auto reopened = projectdb::ProjectDb::open(path, options());
+    CHECK(reopened.ok());
+    if (!reopened.ok())
+        return;
+    checkV030Data(reopened.value());
+    auto again = projectdb::polesBefore(reopened.value());
+    CHECK(again.ok() && again.value() == tenDecimalRows());
+    if (again.ok() && again.value().size() == 3)
+        CHECK(again.value()[0].north == "6512240.8500000000");
 }
 
 // De sex nycklarna för linberäkningsraderna och vägen tillbaka till lina och skede.
@@ -1762,12 +1983,15 @@ void testReadOnlyWrites()
     CHECK(projectdb::linkLineCalc(p, 1, "line_calc_phase_before").error().code == ErrorCode::AccessDenied);
     CHECK(projectdb::detachLineCalc(p, 1).error().code == ErrorCode::AccessDenied);
     CHECK(projectdb::removeLineCalc(p, 1).error().code == ErrorCode::AccessDenied);
+    CHECK(projectdb::setPolesBefore(p, tenDecimalRows()).error().code == ErrorCode::AccessDenied);
     CHECK(!p.isModified());
     CHECK(p.revision() == 0);
     auto spans = projectdb::normalSpans(p);
     CHECK(spans.ok() && spans.value().size() == 1);
     auto calcs = projectdb::lineCalcs(p);
     CHECK(calcs.ok() && calcs.value().size() == 1);
+    auto poles = projectdb::polesBefore(p);
+    CHECK(poles.ok() && poles.value().empty());
 }
 
 // Ogiltiga gränser och tal ger Invalid, och ett id som saknas ger NotFound.
@@ -1861,6 +2085,41 @@ void testInvalid()
     CHECK(!projectdb::lineCalc(p, id.value()).ok());
 }
 
+// Ett tal som inte är kanonisk decimaltext ger Invalid med rad och kolumn, och ingenting ändras.
+void testPoleTableInvalid()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Ogiltig stolptabell", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+    CHECK(projectdb::setPolesBefore(p, tenDecimalRows()).ok());
+    const auto revision = p.revision();
+
+    // Decimalkomma är inte kanonisk text, och bokstäver är inget tal. Raden räknas från 1.
+    std::vector<poletable::PoleRow> rows = tenDecimalRows();
+    rows[1].av = "6512240,85";
+    auto bad = projectdb::setPolesBefore(p, rows);
+    CHECK(!bad.ok() && bad.error().code == ErrorCode::Invalid);
+    if (!bad.ok())
+        CHECK(bad.error().message == "Stolptabellen har ett ogiltigt tal på rad 2 i kolumnen Av.");
+
+    rows = tenDecimalRows();
+    rows[2].north = "abc";
+    bad = projectdb::setPolesBefore(p, rows);
+    CHECK(!bad.ok() && bad.error().code == ErrorCode::Invalid);
+    if (!bad.ok())
+        CHECK(bad.error().message == "Stolptabellen har ett ogiltigt tal på rad 3 i kolumnen Koordinat N.");
+
+    // En ogiltig rad som står sist bland tomma rader avvisas också, och inget har ändrats.
+    rows = tenDecimalRows();
+    rows.push_back(poleRow("", "", "", "", "", "", "1e5", ""));
+    bad = projectdb::setPolesBefore(p, rows);
+    CHECK(!bad.ok() && bad.error().code == ErrorCode::Invalid);
+    CHECK(p.revision() == revision);
+    auto back = projectdb::polesBefore(p);
+    CHECK(back.ok() && back.value() == tenDecimalRows());
+}
+
 // Revisionen räknas upp av varje skrivning, och en skrivning efter bilden lämnar projektet ändrat.
 void testRevision()
 {
@@ -1887,6 +2146,9 @@ void testRevision()
     CHECK(p.isModified());
     CHECK(publishNow(p));
     CHECK(!p.isModified());
+    CHECK(projectdb::setPolesBefore(p, tenDecimalRows()).ok());
+    CHECK(p.revision() == 3);
+    CHECK(p.isModified());
 }
 
 // Provprojektet för röktestet: ligger kvar i KALKYL_PROV_DIR och är stängt och olåst. Det har
@@ -1922,6 +2184,15 @@ void testProvProject()
         CHECK(projectdb::saveLineCalc(p, manualCalc(t1Input(linecalc::CalcMode::Excel)),
                                       "line_calc_phase_after")
                   .ok());
+        // Stolptabell före med mockens sex rader (planen, bilaga A).
+        CHECK(projectdb::setPolesBefore(
+                  p, {poleRow("ST0378", "363", "362", "348", "6512240.85", "412181.98", "44.19", "255/262"),
+                      poleRow("ST0379", "267", "320", "375", "6511904.92", "412013.87", "28.05", ""),
+                      poleRow("ST0380", "344", "345", "264", "6511653.69", "411933.25", "22.27", "262/262"),
+                      poleRow("ST0381", "344", "374", "427", "6511247.08", "411804.35", "30.01", "262/262"),
+                      poleRow("ST0382", "378", "305", "322", "6510940.33", "411706.06", "48.54", ""),
+                      poleRow("ST0383", "181", "300", "287", "6510691.90", "411562.70", "42.00", "241/241")})
+                  .ok());
         CHECK(publishNow(p));
         p.close();
     }
@@ -1955,6 +2226,7 @@ int main()
     testSchemaTables();
     testMigrateFromV010();
     testMigrateFromV020();
+    testMigrateFromV030();
     testMissingTablesRejected();
     testDocValues();
     testConductorCopies();
@@ -1967,8 +2239,10 @@ int main()
     testLineCalcResolve();
     testLineCalcDetach();
     testLineCalcRemove();
+    testPoleTableRoundTrip();
     testReadOnlyWrites();
     testInvalid();
+    testPoleTableInvalid();
     testRevision();
     testProvProject();
 

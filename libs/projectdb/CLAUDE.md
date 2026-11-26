@@ -5,14 +5,15 @@ Biblioteket heter `kalkyl_projectdb`, namnrymden `kalkyl::projectdb` och include
 Arbetsmodellen (2.3 till 2.7), schemat (2.10) och API:t (5.5) står i planen `doc/plans/archive/2026-11-20_Grunder.md`.
 Dokumentationens värden, linkopiorna och normalspannsberäkningarna står i planen `doc/plans/archive/2026-11-23_Normalspann.md` (3.3 till 3.12, 4.1 och 5.5 till 5.6).
 Linberäkningarna, kopplingen till Dokumentation och upplösningen står i planen `doc/plans/archive/2026-11-25_Linberakning_fas_2.md` (avsnitt 2.1 till 2.3, 3 och 4).
+Stolptabell före står i planen `doc/plans/archive/2026-11-26_Stolptabell_fore.md` (4 och 5.4).
 
 | Fil | Innehåll |
 |---|---|
-| `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform`, `kalkyl_ancalc`, `kalkyl_conductor`, `kalkyl_linecalc`, `kalkyl_tabletext` och `kalkyl_version`). Testet `projectdb` ligger i `tests/` |
+| `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform`, `kalkyl_ancalc`, `kalkyl_conductor`, `kalkyl_linecalc`, `kalkyl_poletable` (PUBLIC, eftersom `project_data.h` inkluderar den), `kalkyl_tabletext` och `kalkyl_version`). Testet `projectdb` ligger i `tests/` |
 | `project_db.h` | `ProjectDb`, `OpenOptions`, `Snapshot`, `Access`, `defaultWorkDir`, `withExtension` och `cleanWorkDir` |
-| `dev_migration.h` | Utvecklingsmigreringen: stegen efter v0.1.0 (`dev::kStep2` med linkopiorna, Dokumentation och normalspannet, `dev::kStep3` med linberäkningarna). Töms vid 1.0.0 |
+| `dev_migration.h` | Utvecklingsmigreringen: stegen efter v0.1.0 (`dev::kStep2` med linkopiorna, Dokumentation och normalspannet, `dev::kStep3` med linberäkningarna, `dev::kStep4` med Stolptabell före). Töms vid 1.0.0 |
 | `project_db.cpp` | Schemat (steg 1, v0.1.0, och stegen ur `dev_migration.h`), `create`, `open` med schemakontroll, lås, städning vid fel, `snapshot`/`publish`/`published`, revisionen och `close` |
-| `project_data.h` | Dataskrivningarna och läsningarna: `DocValue`, `NormalSpan`, `LineCalc`, `Wire`, `Stage`, `docValues`, `setDocValue`, linkopiorna, beräkningarna, kopplingarna och upplösningen av linberäkningarna |
+| `project_data.h` | Dataskrivningarna och läsningarna: `DocValue`, `NormalSpan`, `LineCalc`, `Wire`, `Stage`, `docValues`, `setDocValue`, linkopiorna, beräkningarna, kopplingarna, upplösningen av linberäkningarna och Stolptabell före (`polesBefore`, `setPolesBefore`) |
 | `project_data.cpp` | Implementationen av `project_data.h`: SQL i råa strängliteraler, en transaktion per skrivning |
 ## Regler
 
@@ -34,9 +35,11 @@ Linberäkningarna, kopplingen till Dokumentation och upplösningen står i plane
 - **Steg 1** (`kSchemaV1`, v0.1.0) har bara `project` och ändras aldrig.
 - **Steg 2** (`dev::kStep2` i `dev_migration.h`) lägger till `project_conductor`, `doc_value`, `normal_span`, `normal_span_pole` och `doc_normal_span`.
   Steg 2 är committat i v0.2.0 och ändras aldrig.
-- **Steg 3** (`dev::kStep3`) lägger till `line_calc`, `line_calc_case` (15 rader per beräkning) och `doc_line_calc`. `kSchemaVersion` = 3.
+- **Steg 3** (`dev::kStep3`) lägger till `line_calc`, `line_calc_case` (15 rader per beräkning) och `doc_line_calc`.
+  Steg 3 är committat i v0.3.0 och ändras aldrig.
+- **Steg 4** (`dev::kStep4`) lägger till `pole_before`, Stolptabell före. `kSchemaVersion` = 4. Steget kan ändras fritt tills det committas.
   Ett projekt från en äldre version migreras när det öppnas och sparas med det nya schemat vid nästa publicering.
-  Migreringstesten är `testMigrateFromV010` och `testMigrateFromV020`.
+  Migreringstesten är `testMigrateFromV010`, `testMigrateFromV020` och `testMigrateFromV030` (filen byggd som i v0.3.2, user_version 3).
 - **Schemakontroll:** `open` räknar tabellerna i `kExpectedTablesSql` efter `migrate` och före `quickCheck`. Saknas någon (skadad fil) blir felet `NotADatabase`
   med texten "Projektfilen saknar delar som den här versionen av Kalkyl behöver. Filen är skadad:" följd av en radbrytning och sökvägen.
   Låset och arbetskopian städas som vid andra fel, och texten går inte genom `relabel`. Listan hålls lika med schemat.
@@ -59,6 +62,16 @@ Linberäkningarna, kopplingen till Dokumentation och upplösningen står i plane
   `ON DELETE CASCADE` tar bort kopplingarna och stolparna när beräkningen tas bort. En koppling tömmer radens manuella värde i `doc_value` (referensen står kvar).
 - **Nycklar:** de sex normalspannsnycklarna ges av `normalSpanDocKey(wire, stage)` och de sex linberäkningsnycklarna av `lineCalcDocKey(wire, stage)`
   (`lineCalcRowOf` är motsatsen). Övriga nycklar i `doc_value` är fria.
+
+## Stolptabell före
+
+- **Lagring:** `pole_before(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl)` har en rad per stolpe i tabellens ordning (position 0, 1, 2 ...). Tabellen har ingen kolumn för skede.
+- **Talen är TEXT:** Av, Ah, spannlängd och koordinaterna lagras som kanonisk decimaltext (punkt, inga tusentalsavgränsare, användarens decimaler kvar, `poletable::acceptField`).
+  Aldrig REAL, eftersom decimalerna annars går förlorade. En tom cell är NULL i talkolumnerna, och `pole` och `lkl` är text med `''` som tom.
+- **Läsning:** `polesBefore` ger raderna i ordning. NULL blir tom text. En tom tabell ger en tom lista.
+- **Skrivning:** `setPolesBefore` ersätter hela tabellen i EN transaktion med `poletable::rowsToSave(rows)`. Tomma rader mitt i sparas, tomma rader sist sparas inte.
+  `poletable::firstInvalidColumn` kontrollerar varje talfält före allt annat: ett tal som inte är kanonisk text (till exempel `6512240,85`, `abc` eller `1e5`) ger `Invalid`
+  ("Stolptabellen har ett ogiltigt tal på rad <n> i kolumnen <namn>.", raden 1-baserad i indatat) och inget ändras. Skrivskyddat ger `AccessDenied`.
 
 ## Linberäkningarna
 

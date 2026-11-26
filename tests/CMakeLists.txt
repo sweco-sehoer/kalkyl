@@ -12,6 +12,7 @@ endfunction()
 # Rena beräkningar och hjälpmedel.
 kalkyl_add_test(conductor conductor_test.cpp kalkyl_conductor)
 kalkyl_add_test(tabletext tabletext_test.cpp kalkyl_tabletext)
+kalkyl_add_test(poletable poletable_test.cpp kalkyl_poletable kalkyl_tabletext)
 kalkyl_add_test(ancalc ancalc_test.cpp kalkyl_ancalc)
 kalkyl_add_test(linecalc linecalc_test.cpp kalkyl_linecalc)
 kalkyl_add_test(load_cases load_cases_test.cpp kalkyl_linecalc)

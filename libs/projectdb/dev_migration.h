@@ -141,4 +141,24 @@ CREATE TABLE IF NOT EXISTS doc_line_calc (
 CREATE INDEX IF NOT EXISTS doc_line_calc_calc ON doc_line_calc(calc_id);
 )sql";
 
+// Steg 4 (user_version 3 -> 4): stolptabellen i fliken Stolptabell före. IF NOT EXISTS som i
+// steg 2. Talen är TEXT, så att användarens decimaler bevaras exakt.
+inline constexpr std::string_view kStep4 = R"sql(
+-- Fliken Stolptabell före: en rad per stolpe i tabellens ordning (position 0, 1, 2 ...),
+-- också tomma rader mitt i tabellen.
+-- Talen är kanonisk decimaltext (punkt, inga tusentalsavgränsare, användarens decimaler kvar).
+-- TEXT-affiniteten gör att SQLite aldrig gör om dem till tal. NULL = tom cell.
+CREATE TABLE IF NOT EXISTS pole_before (
+    position INTEGER PRIMARY KEY,
+    pole     TEXT    NOT NULL DEFAULT '',
+    av       TEXT,
+    ah       TEXT,
+    span_m   TEXT,
+    coord_n  TEXT,
+    coord_e  TEXT,
+    coord_h  TEXT,
+    lkl      TEXT    NOT NULL DEFAULT ''
+);
+)sql";
+
 } // namespace kalkyl::projectdb::dev

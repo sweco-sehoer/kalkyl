@@ -10,6 +10,7 @@
 #include "conductor/conductor.h"
 #include "core/result.h"
 #include "lineCalc/line_calc.h"
+#include "poleTable/pole_table.h"
 #include "projectdb/project_db.h"
 
 namespace kalkyl::projectdb {
@@ -154,5 +155,13 @@ core::Result<void> detachLineCalc(ProjectDb& p, std::int64_t id);
 // Tar bort beräkningen, dess lastfall och alla dess kopplingar. Saknat id är inget fel.
 // Fel: AccessDenied, Sql.
 core::Result<void> removeLineCalc(ProjectDb& p, std::int64_t id);
+
+// Stolptabellen i fliken Stolptabell före, i tabellens ordning. En tom tabell ger en tom lista.
+core::Result<std::vector<poletable::PoleRow>> polesBefore(ProjectDb& p);
+// Ersätter hela Stolptabell före i EN transaktion med poletable::rowsToSave(rows): tomma rader
+// mitt i sparas, tomma rader sist inte. Positionerna blir 0, 1, 2 ... Talen ska vara kanonisk
+// decimaltext (poletable::acceptField).
+// Fel: AccessDenied, Invalid ("Stolptabellen har ett ogiltigt tal på rad <n> i kolumnen <namn>."), Sql.
+core::Result<void> setPolesBefore(ProjectDb& p, const std::vector<poletable::PoleRow>& rows);
 
 } // namespace kalkyl::projectdb

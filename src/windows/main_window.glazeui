@@ -142,26 +142,32 @@ void MainWindow::initializeComponent()
     stolpRubrik.x = 16;
     stolpRubrik.y = 8;
 
+    stolpInfo.name = "stolpInfo";
+    stolpInfo.setText("Klistra in från Excel med Ctrl+V i den cell där inklistringen ska börja: en cell, rader, kolumner eller ett block. Komma och punkt fungerar båda som decimaltecken, och talen visas med så många decimaler som du skriver. Skriv i den tomma raden sist för att lägga till en stolpe, och ta bort en rad med papperskorgen längst till höger.");
+    stolpInfo.setRole(glaze::Label::Role::Dim);
+    stolpInfo.setWrap(true);
+    stolpInfo.anchors = {true, true, true, false};
+    stolpInfo.x = 16;
+    stolpInfo.anchorTop = {"stolpRubrik", 4};
+    stolpInfo.right = 16;
+
     stolpGrid.name = "stolpGrid";
     stolpGrid.anchors = {true, true, true, true};
     stolpGrid.x = 16;
-    stolpGrid.anchorTop = {"stolpRubrik", 8};
+    stolpGrid.anchorTop = {"stolpInfo", 8};
     stolpGrid.right = 16;
     stolpGrid.bottom = 16;
+    stolpGrid.setSortable(false);
+    stolpGrid.setEditOnClick(false);
     stolpGrid.setHeaderLines(2);
-    stolpGrid.setColumns({{.text = "Stolpplats", .width = 120, .sizing = glaze::ColumnSizing::Autosize}, {.text = "Av", .width = 70, .align = glaze::Align::Right}, {.text = "Ah", .width = 70, .align = glaze::Align::Right}, {.text = "Spannlängd\nföreg.", .width = 90, .align = glaze::Align::Right}, {.text = "Koordinat\nN", .width = 120, .align = glaze::Align::Right}, {.text = "Koordinat\nE", .width = 110, .align = glaze::Align::Right}, {.text = "Koordinat\nH", .width = 80, .align = glaze::Align::Right}, {.text = "LKL", .width = 80}});
-    stolpGrid.setColumnEditor(1, {glaze::DataGrid::Editor::Number});
-    stolpGrid.setColumnEditor(2, {glaze::DataGrid::Editor::Number});
-    stolpGrid.setColumnEditor(3, {glaze::DataGrid::Editor::Number});
-    stolpGrid.setColumnEditor(4, {.editor = glaze::DataGrid::Editor::Number, .decimals = 2});
-    stolpGrid.setColumnEditor(5, {.editor = glaze::DataGrid::Editor::Number, .decimals = 2});
-    stolpGrid.setColumnEditor(6, {.editor = glaze::DataGrid::Editor::Number, .decimals = 2});
-    stolpGrid.addRow({"ST0378", "363", "362", "348", "6512240.85", "412181.98", "44.19", "255/262"});
-    stolpGrid.addRow({"ST0379", "267", "320", "375", "6511904.92", "412013.87", "28.05", ""});
-    stolpGrid.addRow({"ST0380", "344", "345", "264", "6511653.69", "411933.25", "22.27", "262/262"});
-    stolpGrid.addRow({"ST0381", "344", "374", "427", "6511247.08", "411804.35", "30.01", "262/262"});
-    stolpGrid.addRow({"ST0382", "378", "305", "322", "6510940.33", "411706.06", "48.54", ""});
-    stolpGrid.addRow({"ST0383", "181", "300", "287", "6510691.90", "411562.70", "42.00", "241/241"});
+    stolpGrid.setColumns({{.text = "Stolpplats", .width = 120, .sizing = glaze::ColumnSizing::Autosize}, {.text = "Av", .width = 70, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Vertikal linlängd (m) som belastar stolpen. Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Ah", .width = 70, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Horisontell linlängd (m), för vindberäkningar. Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Spannlängd\nföreg.", .width = 90, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Spannlängden (m) till föregående stolpe. Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Koordinat\nN", .width = 120, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat N (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Koordinat\nE", .width = 110, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat E (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Koordinat\nH", .width = 80, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat H (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "LKL", .width = 80, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Längdklass: fackverkstolpens längd i decimeter, till exempel 262 = 26,2 m."}, {.text = "", .width = 36, .align = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Radera raden"}});
+    stolpGrid.setColumnEditor(1, {glaze::DataGrid::Editor::Text});
+    stolpGrid.setColumnEditor(2, {glaze::DataGrid::Editor::Text});
+    stolpGrid.setColumnEditor(3, {glaze::DataGrid::Editor::Text});
+    stolpGrid.setColumnEditor(4, {glaze::DataGrid::Editor::Text});
+    stolpGrid.setColumnEditor(5, {glaze::DataGrid::Editor::Text});
+    stolpGrid.setColumnEditor(6, {glaze::DataGrid::Editor::Text});
+    stolpGrid.setColumnEditor(8, {glaze::DataGrid::Editor::Button});
 
     nsRubrik.name = "nsRubrik";
     nsRubrik.setText("Normalspannsberäkningar");
@@ -244,6 +250,11 @@ void MainWindow::initializeComponent()
     themeBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { themeBtnClicked(s, e); };
     byggPmGrid.onCommit = [this](glaze::Widget* s, glaze::CellChangeArgs& e) { byggPmGridCommitted(s, e); };
     byggPmGrid.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { byggPmGridContextMenu(s, e); };
+    stolpGrid.onCommit = [this](glaze::Widget* s, glaze::CellChangeArgs& e) { stolpGridCommitted(s, e); };
+    stolpGrid.onCellClick = [this](glaze::Widget* s, glaze::CellClickArgs& e) { stolpGridCellClicked(s, e); };
+    stolpGrid.onKeyDown = [this](glaze::Widget* s, glaze::KeyArgs& e) { stolpGridKeyDown(s, e); };
+    stolpGrid.onMouseUp = [this](glaze::Widget* s, glaze::MouseArgs& e) { stolpGridMouseUp(s, e); };
+    stolpGrid.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { stolpGridContextMenu(s, e); };
     nsNyBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsNyBtnClicked(s, e); };
     nsAndraBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsAndraBtnClicked(s, e); };
     nsKopieraBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsKopieraBtnClicked(s, e); };
@@ -282,6 +293,7 @@ void MainWindow::initializeComponent()
     byggPmPanel.adopt(byggPmRosa);
     byggPmPanel.adopt(byggPmGrid);
     stolpPanel.adopt(stolpRubrik);
+    stolpPanel.adopt(stolpInfo);
     stolpPanel.adopt(stolpGrid);
     nsPanel.adopt(nsRubrik);
     nsPanel.adopt(nsNyBtn);

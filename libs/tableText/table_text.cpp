@@ -20,22 +20,22 @@ bool isAsciiSpace(char c)
     return c == ' ' || c == kTab || c == kLf || c == kCr;
 }
 
+// Hårt mellanslag (U+00A0), smalt hårt mellanslag (U+202F) och minustecken (U+2212) i UTF-8,
+// byggda med char-värden så att källan inte behöver escape-sekvenser.
+const std::string kNbsp = {static_cast<char>(0xC2), static_cast<char>(0xA0)};
+const std::string kNarrowNbsp = {static_cast<char>(0xE2), static_cast<char>(0x80), static_cast<char>(0xAF)};
+const std::string kMinus = {static_cast<char>(0xE2), static_cast<char>(0x88), static_cast<char>(0x92)};
+
 // Sant om texten börjar med byteföljden på position i.
 bool startsWithAt(std::string_view s, std::size_t i, std::string_view seq)
 {
     return s.size() - i >= seq.size() && s.compare(i, seq.size(), seq) == 0;
 }
 
-} // namespace
-
-// Tolkar ett tal ur inmatad eller inklistrad text. Först rensas blanktecken (också hårt och smalt
-// mellanslag), tecknet läses (också U+2212) och komma görs till punkt. Hela texten måste vara ett tal.
-std::optional<double> parseDecimal(std::string_view text)
+// Talets text utan blanktecken (ASCII, U+00A0 och U+202F), med U+2212 som ASCII-minus.
+// Gemensam rensning för parseDecimal och normalizeDecimal; tolkningen sker sedan i dem.
+std::string stripBlanks(std::string_view text)
 {
-    constexpr std::string_view kNbsp = "\xC2\xA0";
-    constexpr std::string_view kNarrowNbsp = "\xE2\x80\xAF";
-    constexpr std::string_view kMinus = "\xE2\x88\x92";
-
     std::string clean;
     for (std::size_t i = 0; i < text.size();) {
         if (startsWithAt(text, i, kNbsp)) {
@@ -52,6 +52,16 @@ std::optional<double> parseDecimal(std::string_view text)
             ++i;
         }
     }
+    return clean;
+}
+
+} // namespace
+
+// Tolkar ett tal ur inmatad eller inklistrad text. Först rensas blanktecken (också hårt och smalt
+// mellanslag), tecknet läses (också U+2212) och komma görs till punkt. Hela texten måste vara ett tal.
+std::optional<double> parseDecimal(std::string_view text)
+{
+    const std::string clean = stripBlanks(text);
     if (clean.empty())
         return std::nullopt;
 
@@ -113,6 +123,93 @@ std::string formatDecimal(double value, int decimals, char separator)
         if (c == '.')
             c = separator;
     return out;
+}
+
+// Gör om inmatad text till kanonisk decimaltext. Blanktecken (också U+00A0 och U+202F) tas bort,
+// U+2212 blir minustecken, och resten måste vara siffror med högst ett decimaltecken.
+// Inledande nollor i heltalsdelen stryks och decimalerna behålls exakt som de skrevs.
+std::optional<std::string> normalizeDecimal(std::string_view text)
+{
+    const std::string clean = stripBlanks(text);
+    if (clean.empty())
+        return std::string();
+
+    // Tecknet först.
+    bool negative = false;
+    std::size_t start = 0;
+    if (clean[0] == '-' || clean[0] == '+') {
+        negative = clean[0] == '-';
+        start = 1;
+    }
+
+    // Siffror och högst ett decimaltecken.
+    std::string intPart;
+    std::string decPart;
+    bool seenSeparator = false;
+    for (std::size_t i = start; i < clean.size(); ++i) {
+        const char c = clean[i];
+        if (c >= '0' && c <= '9') {
+            (seenSeparator ? decPart : intPart).push_back(c);
+        } else if ((c == ',' || c == '.') && !seenSeparator) {
+            seenSeparator = true;
+        } else {
+            return std::nullopt;
+        }
+    }
+    if (intPart.empty() && decPart.empty())
+        return std::nullopt;
+
+    // Inledande nollor stryks men minst en nolla blir kvar.
+    const std::size_t firstNonZero = intPart.find_first_not_of('0');
+    intPart = firstNonZero == std::string::npos ? std::string("0") : intPart.substr(firstNonZero);
+
+    // Minustecknet stryks när alla siffror är noll.
+    const bool allZero = intPart == "0" && decPart.find_first_not_of('0') == std::string::npos;
+    std::string out;
+    if (negative && !allZero)
+        out.push_back('-');
+    out += intPart;
+    if (!decPart.empty()) {
+        out.push_back('.');
+        out += decPart;
+    }
+    return out;
+}
+
+// Skriver kanonisk decimaltext med separator som decimaltecken. Med group delas heltalsdelen
+// i tretal med hårt mellanslag (U+00A0). Decimalerna grupperas aldrig.
+std::string formatDecimalText(std::string_view canonical, char separator, bool group)
+{
+    const std::size_t dot = canonical.find('.');
+    std::string_view intPart = dot == std::string_view::npos ? canonical : canonical.substr(0, dot);
+
+    std::string out;
+    if (!intPart.empty() && intPart[0] == '-') {
+        out.push_back('-');
+        intPart.remove_prefix(1);
+    }
+    for (std::size_t i = 0; i < intPart.size(); ++i) {
+        if (group && i > 0 && (intPart.size() - i) % 3 == 0)
+            out += kNbsp;
+        out.push_back(intPart[i]);
+    }
+    if (dot != std::string_view::npos) {
+        out.push_back(separator);
+        out += canonical.substr(dot + 1);
+    }
+    return out;
+}
+
+// Texten utan ASCII-blanktecken i början och slutet, samma blanktecken som tolkningen hoppar över.
+std::string trimmed(std::string_view text)
+{
+    std::size_t b = 0;
+    std::size_t e = text.size();
+    while (b < e && isAsciiSpace(text[b]))
+        ++b;
+    while (e > b && isAsciiSpace(text[e - 1]))
+        --e;
+    return std::string(text.substr(b, e - b));
 }
 
 // Delar tabbseparerad text i rader och fält. Ett fält som börjar med citattecken läses

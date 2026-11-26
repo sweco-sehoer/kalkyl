@@ -108,7 +108,9 @@ void setSelectionOf(const State& s, CellPos anchor, CellPos extent, bool moveCur
 } // namespace
 
 // Planerar en inklistring: var fälten landar, om första raden är en rubrikrad, kontrollen före
-// ändring och blockets område. Ett fält med bara blanksteg räknas som tomt och tömmer cellen.
+// ändring, blockets område och radantalet som ändringarna behöver (rowsNeeded). Ett fält med
+// bara blanksteg räknas som tomt och tömmer cellen. Med growRows får fält landa under tabellen,
+// och med headerTakesRow = false börjar datat på ankarraden när rubrikraden hoppas över.
 SheetPaste planSheetPaste(CellPos anchor, const std::vector<std::vector<std::string>>& block,
                           const SheetShape& shape)
 {
@@ -118,19 +120,16 @@ SheetPaste planSheetPaste(CellPos anchor, const std::vector<std::vector<std::str
     for (const auto& row : block)
         width = std::max(width, static_cast<int>(row.size()));
 
-    // Området: från ankaret till blockets sista rad och kolumn, klampat till tabellen.
-    const int lastRow = std::max(0, shape.rowCount - 1);
-    const int lastColumn = std::max(0, shape.columnCount - 1);
-    paste.area.row0 = std::clamp(anchor.row, 0, lastRow);
-    paste.area.column0 = std::clamp(anchor.column, 0, lastColumn);
-    paste.area.row1 = std::clamp(anchor.row + std::max(0, blockRows - 1), 0, lastRow);
-    paste.area.column1 = std::clamp(anchor.column + std::max(0, width - 1), 0, lastColumn);
+    // Hur många rader datat flyttas upp: 1 när en överhoppad rubrikrad inte tar någon tabellrad.
+    int dataShift = 0;
 
     // Cellen som fältet landar i, eller false när fältet ignoreras (utanför, tomrad, ingen indata).
+    // Med growRows får raden ligga under tabellen.
     const auto lands = [&](int r, int c, int& row, int& column) {
-        row = anchor.row + r;
+        row = anchor.row + r - dataShift;
         column = anchor.column + c;
-        if (row < 0 || row >= shape.rowCount || column < shape.firstColumn || column >= shape.columnCount)
+        if (row < 0 || (!shape.growRows && row >= shape.rowCount) || column < shape.firstColumn ||
+            column >= shape.columnCount)
             return false;
         if (isSkipRow(shape, row))
             return false;
@@ -156,10 +155,22 @@ SheetPaste planSheetPaste(CellPos anchor, const std::vector<std::vector<std::str
             if (!acceptField(row, column, field)) {
                 firstRow = 1;
                 paste.skippedHeader = true;
+                dataShift = shape.headerTakesRow ? 0 : 1;
                 break;
             }
         }
     }
+
+    // Området: från ankaret till blockets sista rad och kolumn. Raderna klampas till tabellen
+    // utom med growRows, där området får gå förbi sista raden.
+    const int lastRow = std::max(0, shape.rowCount - 1);
+    const int lastColumn = std::max(0, shape.columnCount - 1);
+    const int endRow = anchor.row + std::max(0, blockRows - 1 - dataShift);
+    paste.area.row0 = shape.growRows ? std::max(0, anchor.row) : std::clamp(anchor.row, 0, lastRow);
+    paste.area.column0 = std::clamp(anchor.column, 0, lastColumn);
+    paste.area.row1 = shape.growRows ? std::max(0, endRow) : std::clamp(endRow, 0, lastRow);
+    paste.area.column1 = std::clamp(anchor.column + std::max(0, width - 1), 0, lastColumn);
+    paste.rowsNeeded = shape.rowCount;
 
     // Kontroll före ändring, och sedan en ändring per fält.
     std::vector<CellEdit> edits;
@@ -186,6 +197,8 @@ SheetPaste planSheetPaste(CellPos anchor, const std::vector<std::vector<std::str
             edits.push_back({row, column, *text});
         }
     }
+    for (const CellEdit& edit : edits)
+        paste.rowsNeeded = std::max(paste.rowsNeeded, edit.row + 1);
     paste.edits = std::move(edits);
     return paste;
 }
@@ -246,6 +259,7 @@ void SheetGrid::setReadOnly(bool readOnly)
 // synkas efteråt med den aktuella cellen.
 void SheetGrid::keyDown(glaze::KeyArgs& e)
 {
+    syncRowCount();
     const bool ctrl = (e.mods & gfx::kModCtrl) != 0 && (e.mods & gfx::kModAlt) == 0;
     const bool shift = (e.mods & gfx::kModShift) != 0;
     const State s{grid_, shape_, host_, anchor_, extent_};
@@ -336,6 +350,7 @@ void SheetGrid::keyDown(glaze::KeyArgs& e)
 // efteråt. Med Shift utökas markeringen från ankaret.
 void SheetGrid::mouseUp(glaze::MouseArgs& e)
 {
+    syncRowCount();
     if (e.button != gfx::MouseButton::Left)
         return;
     const bool shift = (e.mods & gfx::kModShift) != 0;
@@ -346,6 +361,7 @@ void SheetGrid::mouseUp(glaze::MouseArgs& e)
 // sedan visas snabbmenyn. Skrivskyddat läge har bara Kopiera och Markera alla.
 void SheetGrid::contextMenu(glaze::ContextMenuArgs& e)
 {
+    syncRowCount();
     const State s{grid_, shape_, host_, anchor_, extent_};
     int row = -1;
     if (const auto p = grid_.fromWindow(gfx::Pointf{e.x, e.y}))
@@ -390,6 +406,7 @@ void SheetGrid::contextMenu(glaze::ContextMenuArgs& e)
 // Målar om alla celler i tabellen.
 void SheetGrid::paintAll()
 {
+    syncRowCount();
     const State s{grid_, shape_, host_, anchor_, extent_};
     paintRectOf(s, {0, shape_.firstColumn, shape_.rowCount - 1, shape_.columnCount - 1});
 }
@@ -397,8 +414,34 @@ void SheetGrid::paintAll()
 // Målar om en cell.
 void SheetGrid::paintCell(int row, int column)
 {
+    syncRowCount();
     const State s{grid_, shape_, host_, anchor_, extent_};
     paintCellOf(s, row, column);
+}
+
+// Läser radantalet ur tabellen när formen tillåter att raderna växer, och klampar markeringen
+// när antalet har ändrats. Utan growRows är radantalet fast och inget görs.
+void SheetGrid::syncRowCount()
+{
+    if (shape_.growRows && shape_.rowCount != grid_.rowCount())
+        readRowCount();
+}
+
+// Läser radantalet ur tabellen och klampar ankare och ände till den. Gemensam för
+// syncRowCount och rowsChanged.
+void SheetGrid::readRowCount()
+{
+    shape_.rowCount = grid_.rowCount();
+    anchor_ = clampPos(anchor_, shape_, 1);
+    extent_ = clampPos(extent_, shape_, 1);
+}
+
+// Fönstret har lagt till eller tagit bort rader. Radantalet läses om, markeringen klampas till
+// den nya tabellen och alla celler målas om.
+void SheetGrid::rowsChanged()
+{
+    readRowCount();
+    paintAll();
 }
 
 // Rektangeln mellan ankaret och änden, båda inräknade.
@@ -410,6 +453,7 @@ CellRect SheetGrid::selection() const
 // Sätter markeringen och gör änden till tabellens aktuella cell.
 void SheetGrid::select(CellPos anchor, CellPos extent)
 {
+    syncRowCount();
     const State s{grid_, shape_, host_, anchor_, extent_};
     setSelectionOf(s, anchor, extent, true, 1);
 }
@@ -418,6 +462,7 @@ void SheetGrid::select(CellPos anchor, CellPos extent)
 // tomrad blir en tom rad. Statusraden berättar vad som kopierades.
 void SheetGrid::copySelection()
 {
+    syncRowCount();
     const CellRect rect = rectOf(anchor_, extent_);
     std::vector<std::vector<std::string>> rows;
     for (int r = rect.row0; r <= rect.row1; ++r) {
@@ -435,6 +480,7 @@ void SheetGrid::copySelection()
 // en ruta och ändrar inget. Annars skrivs ändringarna som en och markeringen blir blocket.
 void SheetGrid::pasteAtSelection()
 {
+    syncRowCount();
     const auto block = tabletext::parseTsv(gfx::clipboardText());
     if (block.empty()) {
         host_.showStatus("Urklippet är tomt.");
@@ -456,15 +502,20 @@ void SheetGrid::pasteAtSelection()
         return;
     }
     host_.applyEdits(paste.edits);
+    syncRowCount();
     select({paste.area.row0, paste.area.column0}, {paste.area.row1, paste.area.column1});
-    host_.showStatus("Klistrade in " + std::to_string(block.size() - (paste.skippedHeader ? 1u : 0u)) +
-                     " rader");
+    std::string status = "Klistrade in " + std::to_string(block.size() - (paste.skippedHeader ? 1u : 0u)) +
+                         " rader";
+    if (paste.skippedHeader)
+        status += " (rubrikraden hoppades över)";
+    host_.showStatus(status);
 }
 
 // Läser tabellens aktuella cell. Med extend utökas markeringen från ankaret, annars blir
 // markeringen den aktuella cellen.
 void SheetGrid::syncSelection(bool extend)
 {
+    syncRowCount();
     const int row = grid_.currentRow();
     const int column = grid_.currentColumn();
     if (row < 0 || column < 0)
@@ -480,6 +531,7 @@ void SheetGrid::syncSelection(bool extend)
 // inte är indata rörs inte.
 void SheetGrid::clearSelectionCells()
 {
+    syncRowCount();
     const CellRect rect = rectOf(anchor_, extent_);
     std::vector<CellEdit> edits;
     for (int r = rect.row0; r <= rect.row1; ++r) {
@@ -492,6 +544,7 @@ void SheetGrid::clearSelectionCells()
     if (edits.empty())
         return;
     host_.applyEdits(edits);
+    syncRowCount();
     const State s{grid_, shape_, host_, anchor_, extent_};
     setSelectionOf(s, anchor_, extent_, false, 1);
 }
@@ -499,6 +552,7 @@ void SheetGrid::clearSelectionCells()
 // Markerar alla celler. Den aktuella cellen blir överst till vänster.
 void SheetGrid::selectAll()
 {
+    syncRowCount();
     const State s{grid_, shape_, host_, anchor_, extent_};
     setSelectionOf(s, {shape_.rowCount - 1, shape_.columnCount - 1}, {0, shape_.firstColumn}, true, 1);
 }

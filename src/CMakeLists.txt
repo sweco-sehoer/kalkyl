@@ -25,6 +25,7 @@ target_link_libraries(kalkyl PRIVATE
     kalkyl_ancalc
     kalkyl_linecalc
     kalkyl_sheetgrid
+    kalkyl_poletable
     kalkyl_tabletext
     kalkyl_systemdb
     kalkyl_projectdb

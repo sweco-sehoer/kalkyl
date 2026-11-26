@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -13,8 +14,10 @@
 #include "anCalc/normal_span.h"
 #include "conductor/conductor.h"
 #include "lineCalc/line_calc.h"
+#include "poleTable/pole_table.h"
 #include "projectdb/project_data.h"
 #include "projectdb/project_db.h"
+#include "sheetGrid/sheet_grid.h"
 #include "systemdb/system_db.h"
 
 // Huvudfönstret: programikon (stor först med verktygsfält), menyer och lägesknapp i namnlisten,
@@ -47,6 +50,7 @@ private:
     glaze::DataGrid byggPmGrid;
     glaze::Panel stolpPanel;
     glaze::Label stolpRubrik;
+    glaze::Label stolpInfo;
     glaze::DataGrid stolpGrid;
     glaze::Panel nsPanel;
     glaze::Panel lcPanel;
@@ -310,9 +314,66 @@ private:
     // Sant när projektet är öppnat skrivskyddat.
     bool readOnly() const;
 
-    // Ger stolptabellens rader samma gula, växlande ton som temperaturraderna i Dokumentation
-    // (varannan rad en aning mörkare), så att raderna är lätta att följa.
-    void shadeStolpRows();
+    // En cell i Stolptabell före sparades. Ogiltigt tal i en talkolumn återställs tyst, annars
+    // skrivs fältet om i visningsform och tabellen sparas. Skriver man i den tomma raden sist
+    // läggs en ny stolpe till.
+    void stolpGridCommitted(glaze::Widget* sender, glaze::CellChangeArgs& e);
+
+    // Ett klick på radera-knappen i Stolptabell före. Frågan postas, så att tabellen inte ändras
+    // mitt i sin egen händelse.
+    void stolpGridCellClicked(glaze::Widget* sender, glaze::CellClickArgs& e);
+
+    // Tangenter, musen och högerklick i Stolptabell före går vidare till Excel-markeringen.
+    void stolpGridKeyDown(glaze::Widget* sender, glaze::KeyArgs& e);
+    void stolpGridMouseUp(glaze::Widget* sender, glaze::MouseArgs& e);
+    void stolpGridContextMenu(glaze::Widget* sender, glaze::ContextMenuArgs& e);
+
+    // Adaptern mellan stolptabellen och SheetGrid: vad en cell kopieras som (poletable::copyText),
+    // radtonen, inklistrade ändringar och snabbmenyns egna poster (Infoga rad ovanför, Radera rader…).
+    class PoleSheetHost : public kalkyl::sheetgrid::SheetHost {
+    public:
+        explicit PoleSheetHost(MainWindow& window) : window_(window) {}
+        std::string copyText(int row, int column) const override;
+        std::optional<gfx::Color> baseColor(int row, int column) const override;
+        void applyEdits(const std::vector<kalkyl::sheetgrid::CellEdit>& edits) override;
+        void addMenuItems(glaze::Menu& menu, const kalkyl::sheetgrid::CellRect& selection) override;
+        void showStatus(const std::string& text) override;
+
+    private:
+        MainWindow& window_;
+    };
+
+    // Läser stolptabellen ur projektet till poleRows_ och poleSaved_. Ett fel ger en
+    // meddelanderuta och en tom tabell.
+    void loadPoleTable();
+
+    // Bygger om hela tabellen ur poleRows_ med den tomma raden sist, ger raderna knappar och
+    // ton och sätter tillbaka den aktuella cellen, som setRows nollar.
+    void fillPoleGrid();
+
+    // Radera-kolumnen får radtonen (kolumn 0-7 målas av SheetGrid via baseColor). En datarad i
+    // ett skrivbart projekt får en radera-knapp med papperskorg, annars är cellen låst.
+    void decoratePoleRow(int row);
+
+    // Radens gula ton: varannan rad en aning mörkare, som temperaturraderna i Dokumentation.
+    gfx::Color poleTone(int row) const;
+
+    // Skriver inklistrade och raderade celler i poleRows_ (nya rader läggs till), bygger om
+    // tabellen och sparar.
+    void applyPoleEdits(const std::vector<kalkyl::sheetgrid::CellEdit>& edits);
+
+    // Skriver hela stolptabellen i projektets arbetskopia om den skiljer sig från det senast
+    // sparade. Vid fel visas en ruta och tabellen läses om. Svarar om det lyckades.
+    bool savePoleTable();
+
+    // Infogar en tom rad i poleRows_ vid row, markerar den och sparar.
+    void insertPoleRowAbove(int row);
+
+    // Frågar "Radera stolpplats …?" och tar vid Ja bort raderna first till last (dataraderna).
+    void removePoleRowsAsked(int first, int last);
+
+    // Visar en kort text i statusradens panel för tabellens meddelanden.
+    void setPoleStatus(const std::string& text);
 
     // Bygger raderna i Dokumentation efter läget. Är Topplina höger "Samma" döljs höger-raderna
     // och vänster-raderna heter som en topplina. Värdena läses ur byggPmValues_.
@@ -344,5 +405,11 @@ private:
     int savePanel_ = -1;                                             // sparpanelens plats i statusraden
     std::string saveStatus_;                                         // senaste sparutfallet
     bool saveStatusIsError_ = false;                                 // utfallet var ett fel
+    std::vector<kalkyl::poletable::PoleRow> poleRows_;               // stolptabellens rader, utan den tomma raden sist
+    std::vector<kalkyl::poletable::PoleRow> poleSaved_;              // det senast sparade
+    std::unique_ptr<PoleSheetHost> poleHost_;                        // adaptern mot SheetGrid
+    std::unique_ptr<kalkyl::sheetgrid::SheetGrid> poleSheet_;        // Excel-markeringen i stolpGrid
+    int gridStatusPanel_ = -1;                                       // statusradens panel för tabellens meddelanden
+    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);     // spärr för postade anrop
     glaze::threads::Worker saveWorker_;                              // sist, så att den rivs först
 };

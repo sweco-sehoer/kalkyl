@@ -8,7 +8,7 @@ och kod som flera bibliotek använder ligger i sitt eget bibliotek.
 
 Beroendena går åt ett håll: `core` ← `platform` ← `db` ← `systemdb`/`projectdb` ← `appearance`.
 `conductor` och `tableText` beror bara på standardbiblioteket, `anCalc` beror på `tableText`,
-`lineCalc` beror på `conductor` och `tableText`, `systemdb` beror på `db` och `conductor`, och `projectdb` beror på `db`, `anCalc`, `conductor`, `lineCalc` och `tableText`.
+`lineCalc` beror på `conductor` och `tableText`, `poleTable` beror på `tableText`, `systemdb` beror på `db` och `conductor`, och `projectdb` beror på `db`, `anCalc`, `conductor`, `lineCalc`, `tableText` och `poleTable`.
 `sheetGrid` beror på `glaze` och `tableText`.
 Katalogen får gärna ha versal i mitten (`anCalc`), och målet och namnrymden skrivs med gemener (`kalkyl_ancalc`, `kalkyl::ancalc`).
 Includes skrivs som `"core/result.h"`, `"platform/files.h"` och så vidare, och varje bibliotek
@@ -21,6 +21,7 @@ exporterar `libs/` som include-katalog. Namnrymderna heter `kalkyl::core`, `kalk
 | `core/` | Felmodellen `Result<T>` och `Error` (`kalkyl_core`, INTERFACE) |
 | `conductor/` | Linan som typ (`Conductor`) och valideringen, gemensam för systemdatabasen och projektdatabasen (`kalkyl_conductor`) |
 | `tableText/` | Tabelltext: tal med decimalkomma, tabbseparerat urklipp och inklistring som rena funktioner (`kalkyl_tabletext`) |
+| `poleTable/` | Stolptabellens rader: kolumnerna, talen som kanonisk decimaltext och ändringarna som rena funktioner (`kalkyl_poletable`) |
 | `anCalc/` | Normalspannsberäkningen som rena funktioner (`kalkyl_ancalc`) |
 | `lineCalc/` | Linberäkningen enligt arket Linberäkning och lastfallsmallarna som rena funktioner (`kalkyl_linecalc`) |
 | `platform/` | Win32-nära hjälpmedel: text, system, filer, låsfil och filassociation (`kalkyl_platform`) |

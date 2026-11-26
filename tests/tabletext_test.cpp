@@ -108,11 +108,87 @@ void testTableText()
     CHECK(p3.rowsNeeded == 3);
 }
 
+// Kanonisk decimaltext: normalizeDecimal och formatDecimalText, och trimningen av textfält.
+void testCanonicalDecimal()
+{
+    using tabletext::formatDecimalText;
+    using tabletext::trimmed;
+    using tabletext::normalizeDecimal;
+    using Text = std::optional<std::string>;
+
+    // Specialtecken byggda med char-värden.
+    const std::string nbsp = {static_cast<char>(0xC2), static_cast<char>(0xA0)};
+    const std::string narrow = {static_cast<char>(0xE2), static_cast<char>(0x80), static_cast<char>(0xAF)};
+    const std::string minus = {static_cast<char>(0xE2), static_cast<char>(0x88), static_cast<char>(0x92)};
+
+    CHECK(normalizeDecimal("6512240,8500000000") == Text("6512240.8500000000"));
+    CHECK(normalizeDecimal("6512240.85") == Text("6512240.85"));
+    CHECK(normalizeDecimal("6 512 240,85") == Text("6512240.85"));
+    CHECK(normalizeDecimal("6" + nbsp + "512" + nbsp + "240,85") == Text("6512240.85"));
+    CHECK(normalizeDecimal("6" + narrow + "512" + narrow + "240,85") == Text("6512240.85"));
+    CHECK(normalizeDecimal("44") == Text("44"));
+    CHECK(normalizeDecimal("44,10") == Text("44.10"));
+    CHECK(normalizeDecimal("44.10") == Text("44.10"));
+    CHECK(normalizeDecimal("-12,5") == Text("-12.5"));
+    CHECK(normalizeDecimal(minus + "12,5") == Text("-12.5"));
+    CHECK(normalizeDecimal("+3") == Text("3"));
+    CHECK(normalizeDecimal("-0,00") == Text("0.00"));
+    CHECK(normalizeDecimal("-0") == Text("0"));
+    CHECK(normalizeDecimal(",5") == Text("0.5"));
+    CHECK(normalizeDecimal("5,") == Text("5"));
+    CHECK(normalizeDecimal("007,50") == Text("7.50"));
+    CHECK(normalizeDecimal("000") == Text("0"));
+    CHECK(normalizeDecimal("0,0000000001") == Text("0.0000000001"));
+    CHECK(normalizeDecimal("") == Text(""));
+    CHECK(normalizeDecimal("   ") == Text(""));
+    CHECK(normalizeDecimal(nbsp + narrow) == Text(""));
+    CHECK(normalizeDecimal(" 12 " + std::string(1, char{9}) + " ") == Text("12"));
+    CHECK(!normalizeDecimal("abc"));
+    CHECK(!normalizeDecimal("1,2,3"));
+    CHECK(!normalizeDecimal("1.234,5"));
+    CHECK(!normalizeDecimal("1,234.5"));
+    CHECK(!normalizeDecimal("1e5"));
+    CHECK(!normalizeDecimal("6,51E+06"));
+    CHECK(!normalizeDecimal("-"));
+    CHECK(!normalizeDecimal(","));
+    CHECK(!normalizeDecimal("+-3"));
+    CHECK(!normalizeDecimal("--3"));
+    CHECK(!normalizeDecimal("3-"));
+    CHECK(!normalizeDecimal("12 abc"));
+
+    CHECK(formatDecimalText("6512240.8500000000") == "6512240,8500000000");
+    CHECK(formatDecimalText("6512240.8500000000", '.') == "6512240.8500000000");
+    CHECK(formatDecimalText("44") == "44");
+    CHECK(formatDecimalText("-12.5") == "-12,5");
+    CHECK(formatDecimalText("") == "");
+    CHECK(formatDecimalText("6512240.8500000000", ',', true) == "6" + nbsp + "512" + nbsp + "240,8500000000");
+    CHECK(formatDecimalText("-1234.5", ',', true) == "-1" + nbsp + "234,5");
+    CHECK(formatDecimalText("999", ',', true) == "999");
+    CHECK(formatDecimalText("0.123456", ',', true) == "0,123456");
+    CHECK(formatDecimalText("-999.5", ',', true) == "-999,5");
+    CHECK(formatDecimalText("1000", ',', true) == "1" + nbsp + "000");
+    CHECK(formatDecimalText("123456", ',', true) == "123" + nbsp + "456");
+
+    CHECK(trimmed("  ST 0381 " + std::string(1, char{9})) == "ST 0381");
+    CHECK(trimmed(" ") == "");
+    CHECK(trimmed("") == "");
+
+    // Det kanoniska värdet läses som samma tal som originalet.
+    const std::vector<std::string> valid = {"6512240,85", "6 512 240,85", "-12,5", "+3", "44.10", ",5", "007,50"};
+    for (const std::string& x : valid) {
+        const auto canonical = normalizeDecimal(x);
+        const auto a = tabletext::parseDecimal(x);
+        const auto b = canonical ? tabletext::parseDecimal(*canonical) : std::nullopt;
+        CHECK(canonical && a && b && *a == *b);
+    }
+}
+
 } // namespace
 
 int main()
 {
     testTableText();
+    testCanonicalDecimal();
     if (g_failures == 0)
         std::cout << "tabletext: alla kontroller lyckades" << std::endl;
     else

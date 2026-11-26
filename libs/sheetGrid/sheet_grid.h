@@ -29,6 +29,13 @@ struct SheetShape {
     std::function<bool(int row, int column)> isInput;
     std::function<std::optional<std::string>(int row, int column, const std::string& field)> accept;
     std::function<std::string(int column)> columnName;
+    // Inklistringen får gå förbi sista raden: fält under tabellen blir ändringar i nya rader,
+    // som fönstret lägger till i applyEdits. SheetGrid läser då radantalet ur tabellen före
+    // varje åtgärd, och rowCount är bara startvärdet.
+    bool growRows = false;
+    // En överhoppad rubrikrad tar en rad i tabellen (true, som arket Linberäkning) eller ingen,
+    // så att datat börjar på ankarraden (false, som normalspannet och stolptabellen).
+    bool headerTakesRow = true;
 };
 
 // Ett planerat inklistrat block: ändringarna, om en rubrikrad hoppades över, och blockets
@@ -38,6 +45,8 @@ struct SheetPaste {
     bool skippedHeader = false;
     CellRect area;
     std::optional<std::string> rejected;
+    // Radantalet tabellen behöver för ändringarna: max(rowCount, sista ändrade raden + 1).
+    int rowsNeeded = 0;
 };
 
 // Var ett inklistrat block hamnar (planen fas 2, 5.2). Ren funktion utan fönster.
@@ -86,6 +95,9 @@ public:
     // värdens baseColor.
     void paintAll();
     void paintCell(int row, int column);
+    // Fönstret har lagt till eller tagit bort rader: radantalet läses om, markeringen klampas
+    // och alla celler målas om.
+    void rowsChanged();
     // Markeringen och den aktuella cellen.
     CellRect selection() const;
     void select(CellPos anchor, CellPos extent);
@@ -94,6 +106,10 @@ public:
     void pasteAtSelection();
 
 private:
+    // Med growRows: läser radantalet när det ändrats (readRowCount). Körs först i varje åtgärd.
+    void syncRowCount();
+    // Läser radantalet ur tabellen och klampar markeringen till det.
+    void readRowCount();
     void syncSelection(bool extend);
     void clearSelectionCells();
     void selectAll();

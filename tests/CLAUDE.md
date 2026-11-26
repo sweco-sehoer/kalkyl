@@ -8,7 +8,8 @@ Varje testfil blir ett program `kalkyl_<namn>_test` och ett ctest-test `<namn>`,
 |---|---|---|
 | `CMakeLists.txt` | | `kalkyl_add_test` och ett anrop per testfil, med de bibliotek testet provar |
 | `conductor_test.cpp` | `conductor` | Linans regler, `sameConductorData` och `compareNames` (`libs/conductor`) |
-| `tabletext_test.cpp` | `tabletext` | Talen, den tabbseparerade texten och inklistringen (`libs/tableText`) |
+| `tabletext_test.cpp` | `tabletext` | Talen, den tabbseparerade texten, inklistringen och kanonisk decimaltext (`normalizeDecimal`, `formatDecimalText`) och `trimmed` (`libs/tableText`) |
+| `poletable_test.cpp` | `poletable` | Stolptabellens radmodell: `acceptField`, `displayText` och `copyText`, `numberValue`, `field` och `columnName`, `applyEdits`, tomma rader (`trimTrailingEmptyRows`, `rowsToSave`) och `firstInvalidColumn` (`libs/poleTable`) |
 | `ancalc_test.cpp` | `ancalc` | Normalspannet med arkets 280 spannlängder (exempel A), de syntetiska exemplen B och C och kantfall (`libs/anCalc`) |
 | `linecalc_test.cpp` | `linecalc` | Linberäkningen: ekvationen, T1 i läget Excel och läget Ny (Excel med exakt π), felen, källorna och ett test per avvikelse D1–D6 och D10 (`libs/lineCalc`) |
 | `load_cases_test.cpp` | `load_cases` | Lastfallsmallarna och följdändringarna, ett test per avvikelse D7–D9 och D11 (`libs/lineCalc`) |
@@ -20,8 +21,8 @@ Varje testfil blir ett program `kalkyl_<namn>_test` och ett ctest-test `<namn>`,
 | `association_test.cpp` | `association` | Filassociationen med en testtyp i `HKCU` (`libs/platform`) |
 | `db_test.cpp` | `db` | SQLite-lagret mot en lokal mapp med åäö (`libs/db`) |
 | `systemdb_test.cpp` | `systemdb` | Systemdatabasen i en temporär mapp med åäö (`libs/systemdb`) |
-| `projectdb_test.cpp` | `projectdb` | Projektdatabasen med migreringstesten från v0.1.0 och v0.2.0. Lämnar `Prov åäö.kalkyl` i `KALKYL_PROV_DIR` (`<build>/prov`) åt röktestet |
-| `sheetgrid_test.cpp` | `sheetgrid` | De rena funktionerna i `libs/sheetGrid`, utan fönster |
+| `projectdb_test.cpp` | `projectdb` | Projektdatabasen med migreringstesten från v0.1.0, v0.2.0 och v0.3.x (filen byggd som i v0.3.2) och Stolptabell före (`pole_before`: tio decimaler, tomma rader mitt i, TEXT och NULL, `Invalid`, skrivskydd och revision). Lämnar `Prov åäö.kalkyl` med de sex provraderna i `KALKYL_PROV_DIR` (`<build>/prov`) åt röktestet |
+| `sheetgrid_test.cpp` | `sheetgrid` | De rena funktionerna i `libs/sheetGrid`, utan fönster: block, rubrikrad (med och utan tabellrad), avbruten inklistring, fält utanför tabellen, tomma fält, klampning, växande rader (`growRows`, `rowsNeeded`) och ett enda värde |
 
 - Ett nytt test läggs här med en rad `kalkyl_add_test(<namn> <fil> <bibliotek>...)` och en rad i tabellen ovan.
 - Testerna skriver bara i temporära mappar och i byggkatalogen, aldrig i `%LOCALAPPDATA%\Kalkyl`.

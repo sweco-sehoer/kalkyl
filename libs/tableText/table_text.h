@@ -17,6 +17,20 @@ std::optional<double> parseDecimal(std::string_view text);
 // DataGrids kanoniska celltext. -0 skrivs som 0.
 std::string formatDecimal(double value, int decimals = -1, char separator = ',');
 
+// Ett tal ur inmatad eller inklistrad text som kanonisk decimaltext: valfritt minustecken,
+// heltalssiffror utan inledande nollor och punkt följd av decimalerna exakt som de skrevs.
+// Komma eller punkt (högst ett totalt), blanksteg (också U+00A0 och U+202F) som
+// tusentalsavgränsare, + och U+2212 tillåtna, ingen exponent. Tomt eller bara blanktecken ger ""
+// (tom cell); text som inte är ett tal ger tomt svar.
+std::optional<std::string> normalizeDecimal(std::string_view text);
+
+// Kanonisk decimaltext för visning och urklipp: punkten byts mot separator. Med group
+// grupperas heltalsdelen i tretal med hårt mellanslag (U+00A0); decimalerna grupperas aldrig.
+std::string formatDecimalText(std::string_view canonical, char separator = ',', bool group = false);
+
+// Texten utan ASCII-blanktecken (mellanslag, tabb, CR och LF) i början och slutet.
+std::string trimmed(std::string_view text);
+
 // Tabbseparerad text till rader och fält. Rader skiljs av LF eller CRLF, fält av tabb.
 // En avslutande tom rad tas bort. Ett fält inom citattecken (Excel) får dem borttagna, och
 // två citattecken i rad blir ett; där får fältet innehålla tabb och radbrytning.

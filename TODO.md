@@ -31,10 +31,11 @@
 - 💡 Fler Excel-facit för linberäkningen: testfallen T2 och T11–T16 i doc/plans/archive/2026-11-25_Linberakning.md, 6.4
   (D1, korsningsmall med ändrad min/max, manuell last) som tester i `tests/`, som E1–E10.
 - 💡 Sammanslagning (Sammanslagning.xlsm) som egen beräkningsmodul.
-- 💡 Spara Stolptabell före i projektdatabasen (egen plan). Formuläret för normalspann kan då få
-  "Hämta från stolptabellen".
-- 💡 Normalspannsformuläret använder `libs/sheetGrid` för markering och urklipp, som formuläret Linberäkning.
-  Biblioteket behöver då stöd för att lägga till och ta bort rader.
+- 💡 GlazeUI: ett val för talceller i DataGrid som visar talet med de decimaler som skrevs. Då kan Stolptabell före
+  svälja bokstäver redan vid tangenttrycket. Se doc/plans/archive/2026-11-26_Stolptabell_fore.md, 3.2.
+- 💡 `postIfAlive` finns i tre fönster (huvudfönstret, Normalspann och Linberäkning). Samla den på ett gemensamt ställe.
+- 💡 Normalspannsformuläret använder `libs/sheetGrid` (`growRows`, `headerTakesRow = false`) för markering och urklipp,
+  som Linberäkning och Stolptabell före.
 - 💡 Områdesmarkering, dragmarkering, urklipp och ångra i GlazeUI:s DataGrid. Kalkyl emulerar i dag markeringen
   i normalspannsformuläret. Se doc/plans/archive/2026-11-23_Normalspann.md, avsnitt 3.11 och 14.
 - 💡 Kodsignering av setup.exe, avinstallera.exe och kalkyl.exe med SWECO:s certifikat (SmartScreen, AppLocker).

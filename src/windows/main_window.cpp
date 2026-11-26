@@ -16,6 +16,8 @@
 #include <cmath>
 #include <cstdio>
 #include <ctime>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -49,6 +51,29 @@ constexpr int kLcUtilColumn = 8;
 
 // Radbrytning i texter. Skrivs som tecken så att ingen escape-sekvens behövs i källan.
 const std::string kNl(1, char{10});
+
+// Stolptabellens radera-kolumn: kolumnen efter de åtta datakolumnerna.
+constexpr int kPoleDeleteColumn = kalkyl::poletable::kColumnCount;
+
+// Den tomma raden sist i stolptabellen, där en ny stolpe skrivs: tomma celler i alla nio kolumner.
+// Samma rad när tabellen byggs om och när en ny stolpe lagts till.
+glaze::DataGrid::Row blankPoleRow()
+{
+    glaze::DataGrid::Row blank;
+    blank.cells.assign(kPoleDeleteColumn + 1, std::string());
+    return blank;
+}
+
+// Postar ett anrop till UI-tråden som hoppas över om fönstret hunnit försvinna. MainWindow är en
+// lokal i main-slingan, så en postad lambda får inte nå ett rivet fönster.
+void postIfAlive(const std::shared_ptr<bool>& alive, std::function<void()> fn)
+{
+    std::weak_ptr<bool> weak = alive;
+    glaze::app().post([weak, fn = std::move(fn)] {
+        if (weak.lock())
+            fn();
+    });
+}
 
 // Gruppernas bakgrundsfärger i Dokumentation, halvgenomskinliga så att de fungerar i ljust och mörkt läge.
 const gfx::Color kBlue{60, 130, 210, 56};
@@ -391,6 +416,8 @@ void MainWindow::onLoad(glaze::Widget*, glaze::EventArgs&)
     statusBar.setPanelText(0, project_->path());
     statusBar.addPanel("");
     savePanel_ = statusBar.panelCount() - 1;
+    statusBar.addPanel("");
+    gridStatusPanel_ = statusBar.panelCount() - 1;
     if (readOnly()) {
         const auto& lock = project_->lockedBy();
         statusBar.addPanel(lock ? "Skrivskyddat – öppnat av " + lock->user + " på " + lock->computer
@@ -429,7 +456,30 @@ void MainWindow::onLoad(glaze::Widget*, glaze::EventArgs&)
     rebuildByggPm();
     refreshNormalSpans();
     refreshLineCalcs();
-    shadeStolpRows();
+    loadPoleTable();
+    {
+        // Excel-markeringen i stolptabellen: kolumn 0-7 tar emot inklistring, och nya rader får
+        // läggas till under tabellen.
+        namespace pt = kalkyl::poletable;
+        kalkyl::sheetgrid::SheetShape shape;
+        shape.rowCount = stolpGrid.rowCount();
+        shape.columnCount = pt::kColumnCount;
+        shape.firstColumn = 0;
+        shape.isInput = [](int, int column) { return column >= 0 && column < pt::kColumnCount; };
+        shape.accept = [](int, int column, const std::string& field) { return pt::acceptField(column, field); };
+        shape.columnName = [](int column) { return pt::columnName(column); };
+        shape.growRows = true;
+        shape.headerTakesRow = false;
+        poleHost_ = std::make_unique<PoleSheetHost>(*this);
+        poleSheet_ = std::make_unique<kalkyl::sheetgrid::SheetGrid>(stolpGrid, std::move(shape), *poleHost_);
+    }
+    if (readOnly()) {
+        for (int c = 0; c < kalkyl::poletable::kColumnCount; ++c)
+            stolpGrid.setColumnEditor(c, {.editor = glaze::DataGrid::Editor::Text, .readOnly = true});
+        stolpGrid.setColumnEditor(kPoleDeleteColumn, {glaze::DataGrid::Editor::None});
+        poleSheet_->setReadOnly(true);
+    }
+    fillPoleGrid();
     updateTitle();
     restartAutosave();
     if (defaults && project_->isModified())
@@ -460,16 +510,295 @@ void MainWindow::applyNewProjectDefaults()
     }
 }
 
-// Stolptabellen får samma gula ton och samma växling som temperaturraderna i Dokumentation:
-// varannan rad en aning mörkare, så att raderna är lätta att följa.
-void MainWindow::shadeStolpRows()
+// Läser stolptabellen ur projektet till poleRows_ och poleSaved_. Ett fel loggas och ger en
+// meddelanderuta, och tabellen blir tom.
+void MainWindow::loadPoleTable()
 {
-    for (int r = 0; r < stolpGrid.rowCount(); ++r) {
-        gfx::Color tone = kAmber;
-        tone.a = (r % 2 == 0) ? 64 : 52;
-        for (int col = 0; col < stolpGrid.columnCount(); ++col)
-            stolpGrid.setCellColor(r, col, tone, std::nullopt);
+    auto poles = kalkyl::projectdb::polesBefore(*project_);
+    if (!poles) {
+        gfx::log("Stolptabellen kunde inte läsas: %s", poles.error().detail.c_str());
+        glaze::messageBox(*this, "Stolptabellen kunde inte läsas." + kNl + poles.error().message, "Kalkyl",
+                          glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Error);
+        poleRows_.clear();
+        poleSaved_.clear();
+        return;
     }
+    poleRows_ = std::move(poles.value());
+    poleSaved_ = kalkyl::poletable::rowsToSave(poleRows_);
+}
+
+// Bygger om tabellen: en rad per stolpe ur poleRows_ och den tomma raden sist. Raderna får
+// ton och knapp, och den aktuella cellen sätts tillbaka klampad, eftersom setRows nollar den.
+void MainWindow::fillPoleGrid()
+{
+    namespace pt = kalkyl::poletable;
+    const int currentRow = stolpGrid.currentRow();
+    const int currentColumn = stolpGrid.currentColumn();
+
+    std::vector<glaze::DataGrid::Row> rows;
+    rows.reserve(poleRows_.size() + 1);
+    for (const auto& pole : poleRows_) {
+        glaze::DataGrid::Row row;
+        row.cells.resize(kPoleDeleteColumn + 1);
+        for (int c = 0; c < pt::kColumnCount; ++c)
+            row.cells[static_cast<std::size_t>(c)] = pt::displayText(pole, c);
+        rows.push_back(std::move(row));
+    }
+    rows.push_back(blankPoleRow());
+    stolpGrid.setRows(std::move(rows));
+
+    const int total = stolpGrid.rowCount();
+    for (int r = 0; r < total; ++r)
+        decoratePoleRow(r);
+    if (currentRow >= 0)
+        stolpGrid.setCurrentCell(std::clamp(currentRow, 0, total - 1), std::clamp(currentColumn, 0, kPoleDeleteColumn));
+    if (poleSheet_)
+        poleSheet_->rowsChanged();
+}
+
+// Raden får sin ton i radera-kolumnen. En datarad i ett skrivbart projekt får dessutom en knapp
+// med papperskorg. Den tomma raden sist och skrivskyddat läge får en låst cell utan bild.
+void MainWindow::decoratePoleRow(int row)
+{
+    stolpGrid.setCellColor(row, kPoleDeleteColumn, poleTone(row), std::nullopt);
+    if (row < static_cast<int>(poleRows_.size()) && !readOnly()) {
+        stolpGrid.clearCellEditor(row, kPoleDeleteColumn);  // den förra tomma raden var låst
+        stolpGrid.setCellImage(row, kPoleDeleteColumn, glaze::stockIcon(glaze::StockIcon::Trash));
+        stolpGrid.setCellToolTip(row, kPoleDeleteColumn, "Radera raden");
+    } else {
+        stolpGrid.setCellEditor(row, kPoleDeleteColumn, {glaze::DataGrid::Editor::None});
+    }
+}
+
+// Samma gula ton och växling som temperaturraderna i Dokumentation: varannan rad en aning
+// mörkare, så att raderna är lätta att följa.
+gfx::Color MainWindow::poleTone(int row) const
+{
+    gfx::Color tone = kAmber;
+    tone.a = (row % 2 == 0) ? 64 : 52;
+    return tone;
+}
+
+// En cell i stolptabellen sparades. Ett ogiltigt tal i en talkolumn ger ingen ruta, cellen får
+// bara tillbaka sitt förra värde. Ett giltigt värde skrivs om i visningsform och tabellen sparas.
+// I den tomma raden sist läggs en ny stolpe till, och en ny tom rad kommer efter den.
+void MainWindow::stolpGridCommitted(glaze::Widget*, glaze::CellChangeArgs& e)
+{
+    namespace pt = kalkyl::poletable;
+    const int count = static_cast<int>(poleRows_.size());
+    if (readOnly() || e.row < 0 || e.row > count || e.column < 0 || e.column >= pt::kColumnCount)
+        return;
+    const int r = e.row;
+    const int c = e.column;
+    const auto accepted = pt::acceptField(c, stolpGrid.cell(r, c));
+
+    // Cellens förra visningstext, eller tom text i den tomma raden.
+    const auto shown = [this, r, c, count]() {
+        return r < count ? kalkyl::poletable::displayText(poleRows_[static_cast<std::size_t>(r)], c) : std::string();
+    };
+    if (!accepted) {
+        stolpGrid.setCell(r, c, shown());
+        return;
+    }
+
+    if (r == count) {
+        // Den tomma raden sist: tom text lägger inte till något.
+        if (accepted->empty()) {
+            stolpGrid.setCell(r, c, std::string());
+            return;
+        }
+        poleRows_.emplace_back();
+        pt::field(poleRows_.back(), c) = *accepted;
+        stolpGrid.setCell(r, c, pt::displayText(poleRows_.back(), c));
+        stolpGrid.addRow(blankPoleRow().cells);
+        decoratePoleRow(r);
+        decoratePoleRow(r + 1);
+        poleSheet_->rowsChanged();
+        savePoleTable();
+        return;
+    }
+
+    std::string& field = pt::field(poleRows_[static_cast<std::size_t>(r)], c);
+    const bool changed = field != *accepted;
+    field = *accepted;
+    stolpGrid.setCell(r, c, shown());
+    if (changed)
+        savePoleTable();
+}
+
+// Radera-knappen på en rad. Frågan postas, så att tabellen inte ändras mitt i sin egen händelse.
+void MainWindow::stolpGridCellClicked(glaze::Widget*, glaze::CellClickArgs& e)
+{
+    if (e.column != kPoleDeleteColumn || readOnly() || e.row < 0 || e.row >= static_cast<int>(poleRows_.size()))
+        return;
+    const int row = e.row;
+    postIfAlive(alive_, [this, row] { removePoleRowsAsked(row, row); });
+}
+
+// Tangenterna i tabellen går till Excel-markeringen.
+void MainWindow::stolpGridKeyDown(glaze::Widget*, glaze::KeyArgs& e)
+{
+    if (poleSheet_)
+        poleSheet_->keyDown(e);
+}
+
+// Musen i tabellen går till Excel-markeringen, som synkar markeringen efter klicket.
+void MainWindow::stolpGridMouseUp(glaze::Widget*, glaze::MouseArgs& e)
+{
+    if (poleSheet_)
+        poleSheet_->mouseUp(e);
+}
+
+// Högerklicket i tabellen visar Excel-markeringens snabbmeny.
+void MainWindow::stolpGridContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e)
+{
+    if (poleSheet_)
+        poleSheet_->contextMenu(e);
+}
+
+// Adaptern till SheetGrid: texten en cell kopieras som, med decimalkomma och utan gruppering.
+// Den tomma raden sist ger tom text.
+std::string MainWindow::PoleSheetHost::copyText(int row, int column) const
+{
+    if (row < 0 || row >= static_cast<int>(window_.poleRows_.size()))
+        return std::string();
+    return kalkyl::poletable::copyText(window_.poleRows_[static_cast<std::size_t>(row)], column);
+}
+
+// Adaptern till SheetGrid: cellens färg utan markering är radtonen.
+std::optional<gfx::Color> MainWindow::PoleSheetHost::baseColor(int row, int) const
+{
+    return window_.poleTone(row);
+}
+
+// Adaptern till SheetGrid: inklistrade och raderade celler skrivs i modellen.
+void MainWindow::PoleSheetHost::applyEdits(const std::vector<kalkyl::sheetgrid::CellEdit>& edits)
+{
+    window_.applyPoleEdits(edits);
+}
+
+// Adaptern till SheetGrid: snabbmenyns egna poster, Infoga rad ovanför och Radera rader….
+void MainWindow::PoleSheetHost::addMenuItems(glaze::Menu& menu, const kalkyl::sheetgrid::CellRect& selection)
+{
+    const int count = static_cast<int>(window_.poleRows_.size());
+    const bool writable = !window_.readOnly();
+    const int row0 = selection.row0;
+    const int row1 = std::min(selection.row1, count - 1);
+    MainWindow* window = &window_;
+
+    glaze::MenuItem& insertItem = menu.addItem("Infoga rad ovanför");
+    insertItem.enabled = writable && row0 >= 0 && row0 < count;
+    insertItem.onClick = [window, row0] { window->insertPoleRowAbove(row0); };
+
+    glaze::MenuItem& removeItem = menu.addItem("Radera rader…");
+    removeItem.enabled = writable && row0 <= row1 && row0 < count;
+    removeItem.onClick = [window, row0, row1] {
+        postIfAlive(window->alive_, [window, row0, row1] { window->removePoleRowsAsked(row0, row1); });
+    };
+}
+
+// Adaptern till SheetGrid: en kort text i statusraden.
+void MainWindow::PoleSheetHost::showStatus(const std::string& text)
+{
+    window_.setPoleStatus(text);
+}
+
+// Skriver ändringarna i poleRows_: nya rader läggs till, helt tomma rader sist tas bort.
+// Tabellen byggs om och sparas som EN ändring.
+void MainWindow::applyPoleEdits(const std::vector<kalkyl::sheetgrid::CellEdit>& edits)
+{
+    if (readOnly())
+        return;
+    std::vector<kalkyl::poletable::Edit> converted;
+    converted.reserve(edits.size());
+    for (const auto& edit : edits)
+        converted.push_back({edit.row, edit.column, edit.text});
+    kalkyl::poletable::applyEdits(poleRows_, converted);
+    kalkyl::poletable::trimTrailingEmptyRows(poleRows_);
+    fillPoleGrid();
+    savePoleTable();
+}
+
+// Skriver hela stolptabellen i arbetskopian när den skiljer sig från det senast sparade.
+// Vid fel loggas det, en ruta visas och tabellen läses om (postat, så att tabellen inte byggs om
+// mitt i sin egen händelse). Svarar om det lyckades.
+bool MainWindow::savePoleTable()
+{
+    const auto toSave = kalkyl::poletable::rowsToSave(poleRows_);
+    if (toSave == poleSaved_)
+        return true;
+    const auto saved = kalkyl::projectdb::setPolesBefore(*project_, poleRows_);
+    if (!saved) {
+        gfx::log("Stolptabellen kunde inte sparas: %s", saved.error().detail.c_str());
+        glaze::messageBox(*this, "Stolptabellen kunde inte sparas." + kNl + saved.error().message, "Kalkyl",
+                          glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Error);
+        postIfAlive(alive_, [this] {
+            loadPoleTable();
+            fillPoleGrid();
+        });
+        return false;
+    }
+    poleSaved_ = toSave;
+    updateTitle();
+    return true;
+}
+
+// Infogar en tom rad vid row, bygger om tabellen, markerar den nya raden och sparar. Tomma rader
+// mitt i tabellen sparas.
+void MainWindow::insertPoleRowAbove(int row)
+{
+    if (readOnly() || row < 0 || row >= static_cast<int>(poleRows_.size()))
+        return;
+    commitEdits();
+    poleRows_.insert(poleRows_.begin() + row, kalkyl::poletable::PoleRow{});
+    fillPoleGrid();
+    poleSheet_->select({row, 0}, {row, 0});
+    savePoleTable();
+}
+
+// Frågar "Radera stolpplats ST0381?" med Ja förvalt. Vid Ja tas raderna first till last bort,
+// markeringen hamnar på raden som tog deras plats och tabellen sparas.
+void MainWindow::removePoleRowsAsked(int first, int last)
+{
+    if (readOnly())
+        return;
+    commitEdits();
+    const int count = static_cast<int>(poleRows_.size());
+    first = std::max(first, 0);
+    last = std::min(last, count - 1);
+    if (first > last)
+        return;
+
+    const std::string& firstPole = poleRows_[static_cast<std::size_t>(first)].pole;
+    const std::string& lastPole = poleRows_[static_cast<std::size_t>(last)].pole;
+    const int n = last - first + 1;
+    std::string text;
+    if (n == 1) {
+        text = firstPole.empty() ? "Radera rad " + std::to_string(first + 1) + "?"
+                                 : "Radera stolpplats " + firstPole + "?";
+    } else if (!firstPole.empty() && !lastPole.empty()) {
+        text = "Radera stolpplats " + firstPole + " – " + lastPole + " (" + std::to_string(n) + " rader)?";
+    } else {
+        text = "Radera rad " + std::to_string(first + 1) + " – " + std::to_string(last + 1) + " (" +
+               std::to_string(n) + " rader)?";
+    }
+    if (glaze::messageBox(*this, text, "Radera", glaze::MessageBoxButtons::YesNo,
+                          glaze::MessageBoxType::Warning) != glaze::DialogResult::Yes)
+        return;
+
+    poleRows_.erase(poleRows_.begin() + first, poleRows_.begin() + last + 1);
+    fillPoleGrid();
+    const int target = std::min(first, static_cast<int>(poleRows_.size()));
+    poleSheet_->select({target, 0}, {target, 0});
+    savePoleTable();
+    setPoleStatus(n == 1 ? std::string("Raderade 1 rad.") : "Raderade " + std::to_string(n) + " rader.");
+}
+
+// Skriver en kort text i statusradens panel för tabellens meddelanden.
+void MainWindow::setPoleStatus(const std::string& text)
+{
+    if (gridStatusPanel_ >= 0)
+        statusBar.setPanelText(gridStatusPanel_, text);
 }
 
 // Läser projektets uppgifter: Dokumentationens värden och referenser och linkopiorna. Det som
