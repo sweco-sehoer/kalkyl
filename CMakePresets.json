@@ -53,7 +53,8 @@
     {
       "name": "test",
       "configurePreset": "test",
-      "output": { "outputOnFailure": true }
+      "output": { "outputOnFailure": true },
+      "execution": { "jobs": 8 }
     }
   ]
 }

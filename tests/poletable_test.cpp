@@ -35,7 +35,7 @@ PoleRow fullRow()
     return {"ST0378", "363", "362", "348", "6512240.85", "412181.98", "44.19", "255/262"};
 }
 
-// En rad med bara Stolpplats ifylld.
+// En rad med bara Stolpnr ifylld.
 PoleRow poleOnly(const std::string& name)
 {
     PoleRow r;
@@ -58,6 +58,17 @@ void testAcceptField()
     CHECK(!acceptField(kAh, "1.234,5"));
     CHECK(!acceptField(8, "x"));
     CHECK(!acceptField(-1, "x"));
+
+    // LKL blir alltid "227/262", också med radbrytningar och tomma rader från Excel.
+    const std::string lf(1, char{10});
+    const std::string crlf = std::string(1, char{13}) + lf;
+    CHECK(acceptField(kLkl, "227" + lf + lf + "262") == std::optional<std::string>("227/262"));
+    CHECK(acceptField(kLkl, "227" + lf + "262") == std::optional<std::string>("227/262"));
+    CHECK(acceptField(kLkl, "227" + crlf + crlf + "262") == std::optional<std::string>("227/262"));
+    CHECK(acceptField(kLkl, " 227 / 262 ") == std::optional<std::string>("227/262"));
+    CHECK(acceptField(kLkl, "227" + lf) == std::optional<std::string>("227"));
+    CHECK(acceptField(kLkl, lf + " ") == std::optional<std::string>(""));
+    CHECK(normalizeLkl("227//262") == "227/262");
 }
 
 // Visning med decimalkomma, urklipp utan gruppering och talvärdet för beräkningar.
@@ -98,14 +109,16 @@ void testDisplayAndNumber()
 // field når alla åtta fält i rätt ordning och columnName ger alla åtta namnen.
 void testFieldAndNames()
 {
+    // Ordningen är den i de stolptabeller som klistras in: Stolpnr, N, E, H, Avstånd
+    // föregående, Ah, Av och LKL.
     PoleRow row = fullRow();
     CHECK(field(row, 0) == "ST0378");
-    CHECK(field(row, 1) == "363");
-    CHECK(field(row, 2) == "362");
-    CHECK(field(row, 3) == "348");
-    CHECK(field(row, 4) == "6512240.85");
-    CHECK(field(row, 5) == "412181.98");
-    CHECK(field(row, 6) == "44.19");
+    CHECK(field(row, 1) == "6512240.85");
+    CHECK(field(row, 2) == "412181.98");
+    CHECK(field(row, 3) == "44.19");
+    CHECK(field(row, 4) == "348");
+    CHECK(field(row, 5) == "362");
+    CHECK(field(row, 6) == "363");
     CHECK(field(row, 7) == "255/262");
     const PoleRow& constRow = row;
     CHECK(field(constRow, 8).empty());
@@ -116,13 +129,13 @@ void testFieldAndNames()
     field(row, kLkl) = "262";
     CHECK(row.lkl == "262");
 
-    CHECK(columnName(0) == "Stolpplats");
-    CHECK(columnName(1) == "Av");
-    CHECK(columnName(2) == "Ah");
-    CHECK(columnName(3) == "Spannlängd föreg.");
-    CHECK(columnName(4) == "Koordinat N");
-    CHECK(columnName(5) == "Koordinat E");
-    CHECK(columnName(6) == "Koordinat H");
+    CHECK(columnName(0) == "Stolpnr");
+    CHECK(columnName(1) == "Koordinat N");
+    CHECK(columnName(2) == "Koordinat E");
+    CHECK(columnName(3) == "Koordinat H");
+    CHECK(columnName(4) == "Avstånd föregående");
+    CHECK(columnName(5) == "Ah");
+    CHECK(columnName(6) == "Av");
     CHECK(columnName(7) == "LKL");
     CHECK(columnName(8).empty());
     CHECK(columnName(-1).empty());

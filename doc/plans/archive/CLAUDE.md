@@ -13,3 +13,5 @@ Filnamnen behålls (`ÅÅÅÅ-MM-DD_<Namn>.md`). Planerna ändras inte efter fly
 | `2026-11-25_Linberakning.md` | Linberäkning fas 1: arket Linberäkning ur VBA, lägena Excel och Ny (D1–D11), biblioteken `lineCalc`, `anCalc` och `tableText`, testfall och facit |
 | `2026-11-25_Linberakning_fas_2.md` | Linberäkning fas 2–3: fliken Linberäkning, formuläret som Excel-arket, lagringen i projektet och kopplingen från Dokumentation |
 | `2026-11-26_Stolptabell_fore.md` | Stolptabell före: Excel-inklistring, redigering, papperskorg med fråga, decimaler som de skrevs (`libs/poleTable`), `sheetGrid` med växande rader och sparning i projektet (steg 4) |
+| `2026-11-26_Automatiskt_lage.md` | Version 0.5.0: Stolptabell efter, automatiskt läge med sträckor per lina, lagrade automatiska beräkningar (steg 5), spannlängd ur koordinaterna, kolumnordningen Stolpnr/N/E/H/Avstånd föregående/Ah/Av/LKL och LKL "227/262" (avsnitt 19) |
+| `2026-11-26_Import_stolptabell.md` | Version 0.5.0: Importera stolptabell… i Stolptabell före, xlsx med miniz, kolumnigenkänning på rubrikerna, dialog med Från–Till och importens rådata (steg 6) |

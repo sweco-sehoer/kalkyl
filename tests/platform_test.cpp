@@ -307,6 +307,38 @@ void testLockFile(const std::string& dir)
 
 } // namespace
 
+// readFileShared: läser en fil som en annan handtag har öppen för läsning och skrivning med bara
+// FILE_SHARE_READ (som Excel), och ger NotFound för en saknad fil och Invalid för en för stor.
+void testReadFileShared(const std::string& dir)
+{
+    const std::string path = dir + "/delad läsning.xlsx";
+    const std::string content = "PK innehåll åäö med radbrytning" + std::string(1, char{10}) + "och mer";
+    writeFile(path, content);
+
+    HANDLE excel = CreateFileW(toWide(path).c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(excel != INVALID_HANDLE_VALUE);
+    auto shared = readFileShared(path, 1024);
+    CHECK(shared.ok());
+    if (shared.ok())
+        CHECK(shared.value() == content);
+    if (excel != INVALID_HANDLE_VALUE)
+        CloseHandle(excel);
+
+    auto missing = readFileShared(dir + "/finns inte.xlsx", 1024);
+    CHECK(!missing.ok() && missing.error().code == ErrorCode::NotFound);
+
+    auto tooBig = readFileShared(path, content.size() - 1);
+    CHECK(!tooBig.ok() && tooBig.error().code == ErrorCode::Invalid);
+    auto exact = readFileShared(path, content.size());
+    CHECK(exact.ok());
+
+    writeFile(path, "");
+    auto empty = readFileShared(path, 10);
+    CHECK(empty.ok() && empty.value().empty());
+    CHECK(removeFile(path).ok());
+}
+
 int main()
 {
     const std::string root = pathToUtf8(std::filesystem::temp_directory_path()) + "/kalkyl-platform-" +
@@ -321,6 +353,7 @@ int main()
     testSystem();
     testWin32Error();
     testFiles(dir);
+    testReadFileShared(dir);
     testLockFile(dir);
 
     std::error_code ec;

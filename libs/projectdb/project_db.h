@@ -15,7 +15,7 @@ namespace kalkyl::projectdb {
 
 inline constexpr std::string_view kExtension     = ".kalkyl";
 inline constexpr std::uint32_t    kApplicationId = 0x4B4C4B50;   // "KLKP"
-inline constexpr int              kSchemaVersion = 4;  // antal steg: 1 (v0.1.0) + dev_migration.h
+inline constexpr int              kSchemaVersion = 6;  // antal steg: 1 (v0.1.0) + dev_migration.h
 
 // Projektets uppgifter ur tabellen project.
 struct ProjectInfo { std::string name; std::string createdUtc; std::string createdWith; };

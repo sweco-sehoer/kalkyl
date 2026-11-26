@@ -2,7 +2,7 @@
 
 Systemdatabasen `system.db`: lokal per användare, alltid synkron på UI-tråden. Biblioteket heter
 `kalkyl_systemdb`, namnrymden `kalkyl::systemdb` och includes skrivs `"systemdb/system_db.h"`.
-Den sparar utseendeläget (`theme_mode`), senaste mapp (`last_folder`), de 10 senaste projekten och linregistret.
+Den sparar utseendeläget (`theme_mode`), senaste mapp (`last_folder`), importmappen (`last_import_folder`), de inlärda rubrikerna (`pole_import_learned`), de 10 senaste projekten och linregistret.
 Plats, schema och felhantering står i den arkiverade planen `doc/plans/archive/2026-11-20_Grunder.md` (2.2, 2.10 och 5.4).
 Linregistret står i den arkiverade planen `doc/plans/archive/2026-11-23_Lindata.md`.
 Typen `Conductor` och valideringen ligger i `libs/conductor` (`kalkyl::conductor`), inte här.
@@ -10,7 +10,7 @@ Typen `Conductor` och valideringen ligger i `libs/conductor` (`kalkyl::conductor
 | Fil | Innehåll |
 |---|---|
 | `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform` och `kalkyl_conductor`). Testet `systemdb` ligger i `tests/` |
-| `system_db.h` | `SystemDb`, `ThemeMode`, `RecentProject`, `kMaxRecent`, `kApplicationId`, `kAutosaveChoices`, `kDefaultAutosaveMinutes` och `defaultPath()` |
+| `system_db.h` | `SystemDb`, `ThemeMode`, `RecentProject`, `LearnedHeader`, `kMaxRecent`, `kApplicationId`, `kAutosaveChoices`, `kDefaultAutosaveMinutes` och `defaultPath()` |
 | `system_db.cpp` | Öppning, migrering, schemakontroll, undanflyttning av skadad fil, inställningar, senaste-listan och linregistret |
 | `conductor_seed_v1.h` | Startdatan: SWECO:s 129 linor som SQL (`kConductorSeedV1`), en del av schemats steg 1 |
 ## Regler
@@ -25,6 +25,13 @@ Typen `Conductor` och valideringen ligger i `libs/conductor` (`kalkyl::conductor
 - **Automatisk sparning:** nyckeln `autosave_minutes` i tabellen `setting`, utan schemaändring. De tillåtna värdena är
   `kAutosaveChoices` (0 = av, 1, 5, 10, 15 och 30 minuter). `autosaveMinutes()` ger förvalet 5 när värdet saknas eller är okänt,
   och `setAutosaveMinutes` ger `Invalid` för ett annat värde.
+- **Importmappen:** nyckeln `last_import_folder` i tabellen `setting`, utan schemaändring. `lastImportFolder()` ger tom text när inget är sparat, och `setLastImportFolder` sparar mappen.
+  Den är skild från `last_folder`, eftersom Excelfilerna ofta ligger i en leveransmapp eller i Hämtade filer och projektväljaren då skulle öppna där.
+  Förvalet för Importera stolptabell… är projektfilens mapp och sedan Dokument, men det väljer huvudfönstret.
+- **Inlärda rubriker:** nyckeln `pole_import_learned` i tabellen `setting`, en rad per rubrik med fältet (0-7, poletable-kolumnen) och den normaliserade rubriken (`poleimport::SourceColumn::key`) skilda med en tabb.
+  Raderna står senast först. `learnedHeaders()` ger en tom lista vid fel eller när inget är sparat, och rader som inte går att tolka hoppas över.
+  `learnHeader(field, key)` lägger rubriken först för fältet, flyttar en likadan som redan finns och behåller högst tio per fält (de senaste). Andra fält rörs inte.
+  Fältet utanför 0-7 och en tom rubrik eller en rubrik med tabb eller radbrytning ger `Invalid`. Tabben och radbrytningen skrivs `char{9}` och `char{10}` i koden.
 - **Senaste projekt:** raden identifieras av `platform::pathKey`, så samma fil med andra versaler ger en rad.
   `touchRecentProject` lägger in och trimmar till `kMaxRecent` i en transaktion.
 - **Ordning:** `last_opened` med millisekunder, och `rowid` avgör vid lika tid.

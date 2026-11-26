@@ -1,10 +1,13 @@
 #include "projectdb/project_data.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
+#include <map>
+#include <set>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -837,8 +840,14 @@ SELECT case_id, temp_source, temp_c, name, standard_case, clearance_case, wind_f
     return std::optional<LineCalc>{std::move(lc)};
 }
 
+// Lägger aₙ för normalspannsraderna i sources.normalSpans: de lagrade kopplingarna (links) utom på
+// tagna rader, och de automatiska beräkningarna. Definieras efter det automatiska läget.
+Result<void> addSpanSources(db::Database& d, const std::vector<std::pair<std::string, std::int64_t>>& links,
+                            DocLineSources& sources);
+
 // Läser det i Dokumentation som en kopplad linberäkning hämtar: uppgifterna, projektets linor
-// och aₙ för varje normalspannsrad med en kopplad beräkning (tomt aₙ när beräkningen har fel).
+// och aₙ för varje normalspannsrad med en kopplad eller automatisk beräkning (tomt aₙ när
+// beräkningen har fel).
 Result<DocLineSources> readLineSources(db::Database& d)
 {
     DocLineSources sources;
@@ -865,18 +874,8 @@ Result<DocLineSources> readLineSources(db::Database& d)
             links.emplace_back(stmt.value().text(0), stmt.value().integer(1));
         }
     }
-    for (const auto& [key, spanId] : links) {
-        auto span = readSpan(d, spanId);
-        if (!span)
-            return span.error();
-        std::optional<double> an;
-        if (span.value()) {
-            const auto calc = ancalc::calculateNormalSpan(span.value()->poles, span.value()->limits);
-            if (calc.result)
-                an = calc.result->an;
-        }
-        sources.normalSpans.emplace_back(key, an);
-    }
+    if (auto r = addSpanSources(d, links, sources); !r)
+        return r.error();
     return sources;
 }
 
@@ -997,6 +996,581 @@ std::optional<double> docNumber(const DocLineSources& docs, std::string_view key
     return tabletext::parseDecimal(text);
 }
 
+// ---- Automatiskt läge ----
+
+constexpr std::array<Wire, 3> kWires = {Wire::Phase, Wire::TopLeft, Wire::TopRight};
+constexpr std::array<Stage, 2> kStages = {Stage::Before, Stage::After};
+
+// Lagringstexten för ett skede i auto_mode och auto_calc.
+std::string_view stageText(Stage stage)
+{
+    return stage == Stage::Before ? "before" : "after";
+}
+
+// Skedet ur lagringstexten.
+Stage stageFromText(const std::string& text)
+{
+    return text == "after" ? Stage::After : Stage::Before;
+}
+
+// Lagringstexten för en lina i auto_calc.
+std::string_view wireText(Wire wire)
+{
+    return wire == Wire::Phase ? "phase" : wire == Wire::TopLeft ? "top_left" : "top_right";
+}
+
+// Linan ur lagringstexten.
+Wire wireFromText(const std::string& text)
+{
+    return text == "phase" ? Wire::Phase : text == "top_left" ? Wire::TopLeft : Wire::TopRight;
+}
+
+// Skedets index i listor om två och linans index i listor om tre.
+std::size_t stageIndex(Stage stage)
+{
+    return stage == Stage::Before ? 0 : 1;
+}
+std::size_t wireIndex(Wire wire)
+{
+    return wire == Wire::Phase ? 0 : wire == Wire::TopLeft ? 1 : 2;
+}
+
+// Tabellen som håller stolptabellen för skedet.
+std::string_view poleTableSql(Stage stage)
+{
+    return stage == Stage::Before ? "pole_before" : "pole_after";
+}
+
+// Läser stolptabellen för skedet i tabellens ordning. NULL i en talkolumn blir tom text.
+Result<std::vector<poletable::PoleRow>> readPoles(db::Database& d, Stage stage)
+{
+    const std::string sql = "SELECT pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl FROM " +
+                            std::string(poleTableSql(stage)) + " ORDER BY position";
+    auto stmt = prepared(d, sql, {});
+    if (!stmt)
+        return stmt.error();
+    std::vector<poletable::PoleRow> rows;
+    while (true) {
+        auto step = stmt.value().step();
+        if (!step)
+            return step.error();
+        if (!step.value())
+            break;
+        // Fälten med namn, så att tabellens kolumnordning (poletable::k…) inte spelar någon roll.
+        const db::Statement& s = stmt.value();
+        poletable::PoleRow row;
+        row.pole = s.text(0);
+        row.av = s.text(1);
+        row.ah = s.text(2);
+        row.spanM = s.text(3);
+        row.north = s.text(4);
+        row.east = s.text(5);
+        row.height = s.text(6);
+        row.lkl = s.text(7);
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+// Läser automatiskt läge för skedet. Utan rad i auto_mode: av och inga sträckor.
+Result<AutoSettings> readAutoSettings(db::Database& d, Stage stage)
+{
+    auto stmt = prepared(d, R"sql(
+SELECT enabled, phase_from, phase_to, top_left_from, top_left_to, top_right_from, top_right_to
+  FROM auto_mode WHERE stage = ?1
+)sql",
+                         {stageText(stage)});
+    if (!stmt)
+        return stmt.error();
+    auto row = stmt.value().step();
+    if (!row)
+        return row.error();
+    AutoSettings settings;
+    if (!row.value())
+        return settings;
+    settings.enabled = stmt.value().integer(0) != 0;
+    for (std::size_t i = 0; i < settings.ranges.size(); ++i) {
+        const int column = static_cast<int>(1 + 2 * i);
+        settings.ranges[i].fromPole = stmt.value().text(column);
+        settings.ranges[i].toPole = stmt.value().text(column + 1);
+    }
+    return settings;
+}
+
+// En rad i auto_calc, och om raderna i normal_span och line_calc med de reserverade id:na finns.
+struct AutoRow {
+    Stage stage = Stage::Before;
+    Wire wire = Wire::Phase;
+    std::int64_t spanId = 0;
+    std::int64_t calcId = 0;
+    int firstRow = -1;
+    int lastRow = -1;
+    std::string issue;
+    bool spanPresent = false;
+    bool calcPresent = false;
+};
+
+// Läser alla rader i auto_calc, före först och i varje skede Phase, TopLeft och TopRight.
+Result<std::vector<AutoRow>> readAutoRows(db::Database& d)
+{
+    auto stmt = prepared(d, R"sql(
+SELECT a.stage, a.wire, a.span_id, a.calc_id, a.first_row, a.last_row, a.issue,
+       (SELECT count(*) FROM normal_span WHERE id = a.span_id),
+       (SELECT count(*) FROM line_calc WHERE id = a.calc_id)
+  FROM auto_calc a
+ ORDER BY CASE a.stage WHEN 'before' THEN 0 ELSE 1 END,
+          CASE a.wire WHEN 'phase' THEN 0 WHEN 'top_left' THEN 1 ELSE 2 END
+)sql",
+                         {});
+    if (!stmt)
+        return stmt.error();
+    std::vector<AutoRow> rows;
+    while (true) {
+        auto step = stmt.value().step();
+        if (!step)
+            return step.error();
+        if (!step.value())
+            break;
+        const db::Statement& s = stmt.value();
+        AutoRow row;
+        row.stage = stageFromText(s.text(0));
+        row.wire = wireFromText(s.text(1));
+        row.spanId = s.integer(2);
+        row.calcId = s.integer(3);
+        row.firstRow = static_cast<int>(s.integer(4));
+        row.lastRow = static_cast<int>(s.integer(5));
+        row.issue = s.text(6);
+        row.spanPresent = s.integer(7) != 0;
+        row.calcPresent = s.integer(8) != 0;
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+// Det som läsningarna behöver för att märka en beräkning som automatisk: raderna i auto_calc och
+// inställningen för varje skede.
+struct AutoContext {
+    std::vector<AutoRow> rows;
+    std::array<AutoSettings, 2> settings;
+};
+
+// Läser auto_calc och inställningarna för båda skedena.
+Result<AutoContext> readAutoContext(db::Database& d)
+{
+    AutoContext ctx;
+    auto rows = readAutoRows(d);
+    if (!rows)
+        return rows.error();
+    ctx.rows = std::move(rows.value());
+    for (Stage stage : kStages) {
+        auto settings = readAutoSettings(d, stage);
+        if (!settings)
+            return settings.error();
+        ctx.settings[stageIndex(stage)] = std::move(settings.value());
+    }
+    return ctx;
+}
+
+// Märkningen av en automatisk beräkning: skede, lina, sträcka och sträckans läsning.
+AutoOrigin originOf(const AutoRow& row, const AutoContext& ctx)
+{
+    AutoOrigin origin;
+    origin.stage = row.stage;
+    origin.wire = row.wire;
+    origin.range = ctx.settings[stageIndex(row.stage)].ranges[wireIndex(row.wire)];
+    origin.firstRow = row.firstRow;
+    origin.lastRow = row.lastRow;
+    origin.issue = row.issue;
+    return origin;
+}
+
+// Raden i auto_calc vars normalspann har id, när normalspannet finns.
+const AutoRow* autoRowOfSpan(const AutoContext& ctx, std::int64_t id)
+{
+    for (const AutoRow& row : ctx.rows)
+        if (row.spanPresent && row.spanId == id)
+            return &row;
+    return nullptr;
+}
+
+// Raden i auto_calc vars linberäkning har id, när linberäkningen finns.
+const AutoRow* autoRowOfCalc(const AutoContext& ctx, std::int64_t id)
+{
+    for (const AutoRow& row : ctx.rows)
+        if (row.calcPresent && row.calcId == id)
+            return &row;
+    return nullptr;
+}
+
+// Märker en läst normalspannsberäkning: en automatisk får sin märkning och bara sin egen rad, en
+// annan förlorar de rader som visar en automatisk beräkning.
+void decorateSpan(NormalSpan& ns, const AutoContext& ctx)
+{
+    if (const AutoRow* row = autoRowOfSpan(ctx, ns.id)) {
+        ns.automatic = originOf(*row, ctx);
+        ns.docKeys = {normalSpanDocKey(row->wire, row->stage)};
+        return;
+    }
+    std::erase_if(ns.docKeys, [&](const std::string& key) {
+        for (const AutoRow& row : ctx.rows)
+            if (row.spanPresent && key == normalSpanDocKey(row.wire, row.stage))
+                return true;
+        return false;
+    });
+}
+
+// Märker en läst linberäkning på samma sätt som decorateSpan.
+void decorateCalc(LineCalc& lc, const AutoContext& ctx)
+{
+    if (const AutoRow* row = autoRowOfCalc(ctx, lc.id)) {
+        lc.automatic = originOf(*row, ctx);
+        lc.docKeys = {lineCalcDocKey(row->wire, row->stage)};
+        return;
+    }
+    std::erase_if(lc.docKeys, [&](const std::string& key) {
+        for (const AutoRow& row : ctx.rows)
+            if (row.calcPresent && key == lineCalcDocKey(row.wire, row.stage))
+                return true;
+        return false;
+    });
+}
+
+// Den automatiska beräkningens rad i auto_calc som raden docKey (normalspanns- eller
+// linberäkningsnyckel) visar, eller nullptr när raden inte är tagen. Delas av isTakenKey och guardRow.
+const AutoRow* takenBy(const std::vector<AutoRow>& rows, std::string_view docKey)
+{
+    for (const AutoRow& row : rows) {
+        if (row.spanPresent && docKey == normalSpanDocKey(row.wire, row.stage))
+            return &row;
+        if (row.calcPresent && docKey == lineCalcDocKey(row.wire, row.stage))
+            return &row;
+    }
+    return nullptr;
+}
+
+// Sant när raden docKey (normalspanns- eller linberäkningsnyckel) visar en automatisk beräkning.
+bool isTakenKey(const AutoContext& ctx, std::string_view docKey)
+{
+    return takenBy(ctx.rows, docKey) != nullptr;
+}
+
+// Spärrarna i planen 7.5. Raderna med de reserverade id:na och de tagna raderna får bara
+// synkningen skriva, också när läget är av och raderna saknas.
+enum class Guard { Change, Remove };
+
+// Felet T1 (ändra) eller T2 (ta bort) för en automatisk beräkning i skedet.
+Error autoGuardError(Stage stage, Guard guard)
+{
+    const std::string table(poleTableName(stage));
+    if (guard == Guard::Remove)
+        return makeError(ErrorCode::Invalid, "Den automatiska beräkningen kan inte tas bort. Stäng av automatiskt läge i " +
+                                                 table + ".");
+    return makeError(ErrorCode::Invalid,
+                     "Den automatiska beräkningen räknas ur " + table + " och kan inte ändras.");
+}
+
+// Spärrar ett normalspannsid som är reserverat i auto_calc. id 0 (ny beräkning) släpps igenom.
+Result<void> guardSpanId(db::Database& d, std::int64_t id, Guard guard)
+{
+    if (id == 0)
+        return {};
+    auto stage = firstText(d, "SELECT stage FROM auto_calc WHERE span_id = ?1", {id});
+    if (!stage)
+        return stage.error();
+    if (stage.value())
+        return autoGuardError(stageFromText(*stage.value()), guard);
+    return {};
+}
+
+// Spärrar ett linberäkningsid som är reserverat i auto_calc. id 0 (ny beräkning) släpps igenom.
+Result<void> guardCalcId(db::Database& d, std::int64_t id, Guard guard)
+{
+    if (id == 0)
+        return {};
+    auto stage = firstText(d, "SELECT stage FROM auto_calc WHERE calc_id = ?1", {id});
+    if (!stage)
+        return stage.error();
+    if (stage.value())
+        return autoGuardError(stageFromText(*stage.value()), guard);
+    return {};
+}
+
+// Spärrar T3: raden docKey visar en automatisk beräkning och får inte kopplas om.
+Result<void> guardRow(db::Database& d, std::string_view docKey)
+{
+    auto ctx = readAutoRows(d);
+    if (!ctx)
+        return ctx.error();
+    if (const AutoRow* row = takenBy(ctx.value(), docKey))
+        return makeError(ErrorCode::Invalid,
+                         "Raden visar en automatisk beräkning ur " + std::string(poleTableName(row->stage)) +
+                             ". Stäng av automatiskt läge där för att koppla en annan beräkning.");
+    return {};
+}
+
+// Anteckningen på de automatiska beräkningarna (planen 7.7).
+std::string autoNote(Stage stage, const std::string& word, const automode::PoleRange& range)
+{
+    std::string note = "Automatisk · " + std::string(poleTableName(stage)) + " · " + word;
+    if (range.fromPole.empty() || range.toPole.empty())
+        return note + ", sträckan är inte vald";
+    return note + " " + range.fromPole + "–" + range.toPole;
+}
+
+// Sant för en stolpe utan Stpnr, spannlängd och H, som inte sparas.
+bool isEmptyPole(const ancalc::SpanPole& pole)
+{
+    return isBlank(pole.pole) && !pole.lengthM && !pole.heightM;
+}
+
+// Sant när två stolplistor är lika i Stpnr, spannlängd och H.
+bool samePoles(const std::vector<ancalc::SpanPole>& a, const std::vector<ancalc::SpanPole>& b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        if (a[i].pole != b[i].pole || a[i].lengthM != b[i].lengthM || a[i].heightM != b[i].heightM)
+            return false;
+    return true;
+}
+
+// Sant när två uppsättningar gränser är lika.
+bool sameLimits(const ancalc::SpanLimits& a, const ancalc::SpanLimits& b)
+{
+    return a.longest == b.longest && a.shortest == b.shortest && a.adjacent == b.adjacent &&
+           a.localMin == b.localMin && a.localMax == b.localMax;
+}
+
+// Skriver stolparna för normalspannet spanId med positionerna 0, 1, 2 ...
+Result<void> writeSpanPoles(db::Database& d, std::int64_t spanId, const std::vector<ancalc::SpanPole>& list)
+{
+    std::int64_t position = 0;
+    for (const ancalc::SpanPole& pole : list) {
+        const Arg length = pole.lengthM ? Arg{*pole.lengthM} : Arg{nullptr};
+        const Arg height = pole.heightM ? Arg{*pole.heightM} : Arg{nullptr};
+        if (auto r = run(d, R"sql(
+INSERT INTO normal_span_pole(span_id, position, pole, length_m, height_m) VALUES(?1, ?2, ?3, ?4, ?5)
+)sql",
+                         {spanId, position, std::string_view(pole.pole), length, height});
+            !r)
+            return r;
+        ++position;
+    }
+    return {};
+}
+
+// Skapar den automatiska normalspannsraden med förvalda gränser. Med id angivet skapas den med
+// just det id:t (läget slås på igen), annars ger AUTOINCREMENT ett nytt. Svarar med id.
+Result<std::int64_t> insertAutoSpan(db::Database& d, std::optional<std::int64_t> id, const std::string& note,
+                                    const std::string& now)
+{
+    const ancalc::SpanLimits limits;
+    if (auto r = run(d, R"sql(
+INSERT INTO normal_span(id, note, limit_longest, limit_shortest, limit_adjacent, limit_local_min,
+                        limit_local_max, created_utc, modified_utc)
+VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+)sql",
+                     {id ? Arg{*id} : Arg{nullptr}, std::string_view(note), limits.longest, limits.shortest,
+                      limits.adjacent, limits.localMin, limits.localMax, std::string_view(now)});
+        !r)
+        return r.error();
+    if (id)
+        return *id;
+    auto rowId = firstInt(d, "SELECT last_insert_rowid()", {});
+    if (!rowId)
+        return rowId.error();
+    return rowId.value().value_or(0);
+}
+
+// Gör den automatiska beräkningen för skedet och linan stämma med stolptabellen och sträckan:
+// skapar saknade rader (med de reserverade id:na när de finns), och uppdaterar stolpar,
+// anteckning och sträckans läsning, men bara det som skiljer sig.
+Result<void> syncOneAuto(db::Database& d, const std::string& now, Stage stage, Wire wire, bool same,
+                         const automode::PoleRange& range, const std::vector<poletable::PoleRow>& rows,
+                         const AutoRow* existing)
+{
+    const std::string word = autoLineWord(wire, same);
+    const automode::RangeSpan span = automode::rangeSpan(rows, range, word, poleTableName(stage));
+    std::vector<ancalc::SpanPole> wanted;
+    for (const ancalc::SpanPole& pole : span.poles)
+        if (!isEmptyPole(pole))
+            wanted.push_back(pole);
+    const std::string note = autoNote(stage, word, range);
+
+    std::int64_t spanId = existing ? existing->spanId : 0;
+    std::int64_t calcId = existing ? existing->calcId : 0;
+    const bool spanFresh = !existing || !existing->spanPresent;
+    const bool calcFresh = !existing || !existing->calcPresent;
+
+    if (spanFresh) {
+        auto id = insertAutoSpan(d, existing ? std::optional<std::int64_t>{spanId} : std::nullopt, note, now);
+        if (!id)
+            return id.error();
+        spanId = id.value();
+        if (auto r = writeSpanPoles(d, spanId, wanted); !r)
+            return r;
+    } else {
+        auto stored = readSpan(d, spanId);
+        if (!stored)
+            return stored.error();
+        if (stored.value()) {
+            const NormalSpan& ns = *stored.value();
+            const ancalc::SpanLimits defaults;
+            const bool polesDiffer = !samePoles(ns.poles, wanted);
+            if (polesDiffer || ns.note != note || !sameLimits(ns.limits, defaults)) {
+                if (auto r = run(d, R"sql(
+UPDATE normal_span
+   SET note = ?2, limit_longest = ?3, limit_shortest = ?4, limit_adjacent = ?5,
+       limit_local_min = ?6, limit_local_max = ?7, modified_utc = ?8
+ WHERE id = ?1
+)sql",
+                                 {spanId, std::string_view(note), defaults.longest, defaults.shortest,
+                                  defaults.adjacent, defaults.localMin, defaults.localMax,
+                                  std::string_view(now)});
+                    !r)
+                    return r;
+            }
+            if (polesDiffer) {
+                if (auto r = run(d, "DELETE FROM normal_span_pole WHERE span_id = ?1", {spanId}); !r)
+                    return r;
+                if (auto r = writeSpanPoles(d, spanId, wanted); !r)
+                    return r;
+            }
+        }
+    }
+
+    const std::string docSource = lineCalcDocKey(wire, stage);
+    if (calcFresh) {
+        LineCalc lc;
+        lc.id = existing ? calcId : 0;
+        lc.note = note;
+        lc.docSource = docSource;
+        lc.input = linecalc::newLineInput();
+        auto stored = storeLineCalc(d, lc, docSource, now);
+        if (!stored)
+            return stored.error();
+        calcId = stored.value();
+    } else {
+        auto oldNote = firstText(d, "SELECT note FROM line_calc WHERE id = ?1", {calcId});
+        if (!oldNote)
+            return oldNote.error();
+        if (oldNote.value() && *oldNote.value() != note)
+            if (auto r = run(d, "UPDATE line_calc SET note = ?2, modified_utc = ?3 WHERE id = ?1",
+                             {calcId, std::string_view(note), std::string_view(now)});
+                !r)
+                return r;
+    }
+
+    if (!existing)
+        return run(d, R"sql(
+INSERT INTO auto_calc(stage, wire, span_id, calc_id, first_row, last_row, issue)
+VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+)sql",
+                   {stageText(stage), wireText(wire), spanId, calcId,
+                    static_cast<std::int64_t>(span.rows.first), static_cast<std::int64_t>(span.rows.last),
+                    std::string_view(span.rows.issue)});
+    if (existing->firstRow != span.rows.first || existing->lastRow != span.rows.last ||
+        existing->issue != span.rows.issue)
+        return run(d, "UPDATE auto_calc SET first_row = ?3, last_row = ?4, issue = ?5 WHERE stage = ?1 AND wire = ?2",
+                   {stageText(stage), wireText(wire), static_cast<std::int64_t>(span.rows.first),
+                    static_cast<std::int64_t>(span.rows.last), std::string_view(span.rows.issue)});
+    return {};
+}
+
+// Håller de automatiska beräkningarna aktuella (planen 6.4). För varje skede och lina tas raderna
+// i normal_span och line_calc bort när linan inte är aktiv, och annars skapas eller uppdateras de
+// ur stolptabellen och sträckan. Körs sist i varje skrivning som ändrar det som den läser:
+// stolptabellerna, auto_mode och doc_value top_conductor_right.
+Result<void> syncAutoCalcs(db::Database& d, const std::string& now)
+{
+    auto right = firstText(d, "SELECT value FROM doc_value WHERE key = 'top_conductor_right'", {});
+    if (!right)
+        return right.error();
+    const bool same = !right.value() || right.value()->empty() || *right.value() == kSameConductor;
+    auto existingRows = readAutoRows(d);
+    if (!existingRows)
+        return existingRows.error();
+
+    for (Stage stage : kStages) {
+        auto settings = readAutoSettings(d, stage);
+        if (!settings)
+            return settings.error();
+        std::vector<poletable::PoleRow> rows;
+        if (settings.value().enabled) {
+            auto read = readPoles(d, stage);
+            if (!read)
+                return read.error();
+            rows = std::move(read.value());
+        }
+        for (Wire wire : kWires) {
+            const AutoRow* existing = nullptr;
+            for (const AutoRow& row : existingRows.value())
+                if (row.stage == stage && row.wire == wire)
+                    existing = &row;
+            const bool active = settings.value().enabled && (wire != Wire::TopRight || !same);
+            if (!active) {
+                if (existing) {
+                    if (auto r = run(d, "DELETE FROM normal_span WHERE id = ?1", {existing->spanId}); !r)
+                        return r;
+                    if (auto r = run(d, "DELETE FROM line_calc WHERE id = ?1", {existing->calcId}); !r)
+                        return r;
+                }
+                continue;
+            }
+            if (auto r = syncOneAuto(d, now, stage, wire, same, settings.value().ranges[wireIndex(wire)], rows,
+                                     existing);
+                !r)
+                return r;
+        }
+    }
+    return {};
+}
+
+// Lägger aₙ för normalspannsraderna i sources.normalSpans, sorterade på nyckel. En tagen rad
+// visar sin automatiska beräkning: en lagrad koppling på raden räknas inte (den vilar), och
+// nyckeln läggs i autoSpanKeys.
+Result<void> addSpanSources(db::Database& d, const std::vector<std::pair<std::string, std::int64_t>>& links,
+                            DocLineSources& sources)
+{
+    auto ctx = readAutoContext(d);
+    if (!ctx)
+        return ctx.error();
+    for (const auto& [key, spanId] : links) {
+        if (isTakenKey(ctx.value(), key))
+            continue;
+        auto span = readSpan(d, spanId);
+        if (!span)
+            return span.error();
+        std::optional<double> an;
+        if (span.value()) {
+            const auto calc = calculateSpan(*span.value());
+            if (calc.result)
+                an = calc.result->an;
+        }
+        sources.normalSpans.emplace_back(key, an);
+    }
+    for (const AutoRow& row : ctx.value().rows) {
+        if (!row.spanPresent)
+            continue;
+        auto span = readSpan(d, row.spanId);
+        if (!span)
+            return span.error();
+        if (!span.value())
+            continue;
+        decorateSpan(*span.value(), ctx.value());
+        std::optional<double> an;
+        const auto calc = calculateSpan(*span.value());
+        if (calc.result)
+            an = calc.result->an;
+        const std::string key = normalSpanDocKey(row.wire, row.stage);
+        sources.normalSpans.emplace_back(key, an);
+        sources.autoSpanKeys.push_back(key);
+    }
+    std::sort(sources.normalSpans.begin(), sources.normalSpans.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    return {};
+}
+
 } // namespace
 
 // Nyckeln för normalspannsraden: ns_calc_<lina>_<skede>.
@@ -1006,6 +1580,44 @@ std::string normalSpanDocKey(Wire wire, Stage stage)
     key += wire == Wire::Phase ? "phase" : wire == Wire::TopLeft ? "top_left" : "top_right";
     key += stage == Stage::Before ? "_before" : "_after";
     return key;
+}
+
+// Normalspannet för en beräkning. En automatisk beräkning vars sträcka inte går att använda
+// ger sträckans fel och inget resultat, annars räknas stolparna.
+ancalc::SpanCalculation calculateSpan(const NormalSpan& ns)
+{
+    if (ns.automatic && !ns.automatic->issue.empty()) {
+        ancalc::SpanCalculation calc;
+        calc.issues.push_back({ancalc::IssueKind::Error, -1, ancalc::SpanColumn::None, ns.automatic->issue});
+        return calc;
+    }
+    return ancalc::calculateNormalSpan(ns.poles, ns.limits);
+}
+
+// Tabellens namn i de automatiska lägets texter.
+std::string_view poleTableName(Stage stage)
+{
+    return stage == Stage::Before ? "Stolptabell före" : "Stolptabell efter";
+}
+
+// Linans ord i texterna. Topplina vänster heter topplinorna när topplina höger är Samma.
+std::string autoLineWord(Wire wire, bool same)
+{
+    if (wire == Wire::Phase)
+        return "faslinan";
+    if (wire == Wire::TopLeft)
+        return same ? "topplinorna" : "topplina vänster";
+    return "topplina höger";
+}
+
+// Linans rubrik i panelen, med samma regel för Samma som autoLineWord.
+std::string autoLineLabel(Wire wire, bool same)
+{
+    if (wire == Wire::Phase)
+        return "Faslina";
+    if (wire == Wire::TopLeft)
+        return same ? "Topplinor" : "Topplina vänster";
+    return "Topplina höger";
 }
 
 // Läser alla rader i doc_value i nyckelordning.
@@ -1039,7 +1651,13 @@ Result<void> setDocValue(ProjectDb& p, const DocValue& v)
         } else if (auto r = upsertDocValue(d, v.key, value, v.reference); !r) {
             return r;
         }
-        return lineKey ? pruneConductors(d) : Result<void>{};
+        if (lineKey)
+            if (auto r = pruneConductors(d); !r)
+                return r;
+        // Samma eller en egen topplina höger ändrar vilka linor som är automatiska.
+        if (v.key == kTopRightConductorKey)
+            return syncAutoCalcs(d, platform::nowUtcIso());
+        return Result<void>{};
     });
 }
 
@@ -1063,7 +1681,11 @@ Result<void> setDocConductor(ProjectDb& p, std::string_view key, const Conductor
             return reference.error();
         if (auto r = upsertDocValue(d, std::string(key), name.value(), reference.value().value_or("")); !r)
             return r;
-        return pruneConductors(d);
+        if (auto r = pruneConductors(d); !r)
+            return r;
+        if (key == kTopRightConductorKey)
+            return syncAutoCalcs(d, platform::nowUtcIso());
+        return Result<void>{};
     });
 }
 
@@ -1096,10 +1718,16 @@ UPDATE project_conductor
     });
 }
 
-// Läser alla beräkningar, efter id.
+// Läser alla beräkningar: de automatiska först, sedan de övriga efter id.
 Result<std::vector<NormalSpan>> normalSpans(ProjectDb& p)
 {
+    auto ctx = readAutoContext(p.local());
+    if (!ctx)
+        return ctx.error();
     std::vector<std::int64_t> ids;
+    for (const AutoRow& row : ctx.value().rows)
+        if (row.spanPresent)
+            ids.push_back(row.spanId);
     {
         auto stmt = prepared(p.local(), "SELECT id FROM normal_span ORDER BY id", {});
         if (!stmt)
@@ -1110,7 +1738,9 @@ Result<std::vector<NormalSpan>> normalSpans(ProjectDb& p)
                 return row.error();
             if (!row.value())
                 break;
-            ids.push_back(stmt.value().integer(0));
+            const std::int64_t id = stmt.value().integer(0);
+            if (!autoRowOfSpan(ctx.value(), id))
+                ids.push_back(id);
         }
     }
     std::vector<NormalSpan> spans;
@@ -1118,16 +1748,26 @@ Result<std::vector<NormalSpan>> normalSpans(ProjectDb& p)
         auto span = readSpan(p.local(), id);
         if (!span)
             return span.error();
-        if (span.value())
-            spans.push_back(std::move(*span.value()));
+        if (!span.value())
+            continue;
+        decorateSpan(*span.value(), ctx.value());
+        spans.push_back(std::move(*span.value()));
     }
     return spans;
 }
 
-// Läser en beräkning. Tomt svar när id saknas.
+// Läser en beräkning med märkning och rader som i normalSpans. Tomt svar när id saknas.
 Result<std::optional<NormalSpan>> normalSpan(ProjectDb& p, std::int64_t id)
 {
-    return readSpan(p.local(), id);
+    auto ctx = readAutoContext(p.local());
+    if (!ctx)
+        return ctx.error();
+    auto span = readSpan(p.local(), id);
+    if (!span)
+        return span.error();
+    if (span.value())
+        decorateSpan(*span.value(), ctx.value());
+    return span;
 }
 
 // Sparar en ny eller befintlig beräkning med alla stolpar i en transaktion. Gränser och tal
@@ -1136,6 +1776,11 @@ Result<std::int64_t> saveNormalSpan(ProjectDb& p, const NormalSpan& ns, std::str
 {
     std::int64_t savedId = 0;
     auto done = write(p, [&](db::Database& d) -> Result<void> {
+        if (auto g = guardSpanId(d, ns.id, Guard::Change); !g)
+            return g;
+        if (!linkDocKey.empty())
+            if (auto g = guardRow(d, linkDocKey); !g)
+                return g;
         const double limits[] = {ns.limits.longest, ns.limits.shortest, ns.limits.adjacent,
                                  ns.limits.localMin, ns.limits.localMax};
         for (double limit : limits)
@@ -1193,20 +1838,14 @@ UPDATE normal_span
                 return r;
         }
 
-        std::int64_t position = 0;
-        for (const ancalc::SpanPole& pole : ns.poles) {
-            if (isBlank(pole.pole) && !pole.lengthM && !pole.heightM)
-                continue;
-            const Arg length = pole.lengthM ? Arg{*pole.lengthM} : Arg{nullptr};
-            const Arg height = pole.heightM ? Arg{*pole.heightM} : Arg{nullptr};
-            if (auto r = run(d, R"sql(
-INSERT INTO normal_span_pole(span_id, position, pole, length_m, height_m) VALUES(?1, ?2, ?3, ?4, ?5)
-)sql",
-                             {savedId, position, std::string_view(pole.pole), length, height});
-                !r)
-                return r;
-            ++position;
-        }
+        // Helt tomma stolpar sparas inte; de övriga får positionerna 0, 1, 2 ...
+        std::vector<ancalc::SpanPole> kept;
+        kept.reserve(ns.poles.size());
+        for (const ancalc::SpanPole& pole : ns.poles)
+            if (!isEmptyPole(pole))
+                kept.push_back(pole);
+        if (auto r = writeSpanPoles(d, savedId, kept); !r)
+            return r;
 
         if (!linkDocKey.empty())
             return linkInside(d, savedId, linkDocKey);
@@ -1220,7 +1859,13 @@ INSERT INTO normal_span_pole(span_id, position, pole, length_m, height_m) VALUES
 // Kopplar raden docKey till beräkningen id. Radens manuella värde töms.
 Result<void> linkNormalSpan(ProjectDb& p, std::int64_t id, std::string_view docKey)
 {
-    return write(p, [&](db::Database& d) { return linkInside(d, id, docKey); });
+    return write(p, [&](db::Database& d) -> Result<void> {
+        if (auto g = guardSpanId(d, id, Guard::Change); !g)
+            return g;
+        if (auto g = guardRow(d, docKey); !g)
+            return g;
+        return linkInside(d, id, docKey);
+    });
 }
 
 // Tar bort kopplingen på raden docKey, för normalspann och linberäkning. Beräkningarna finns
@@ -1228,6 +1873,8 @@ Result<void> linkNormalSpan(ProjectDb& p, std::int64_t id, std::string_view docK
 Result<void> unlinkDocRow(ProjectDb& p, std::string_view docKey)
 {
     return write(p, [&](db::Database& d) -> Result<void> {
+        if (auto g = guardRow(d, docKey); !g)
+            return g;
         auto current = firstInt(d, "SELECT calc_id FROM doc_line_calc WHERE doc_key = ?1", {docKey});
         if (!current)
             return current.error();
@@ -1249,7 +1896,9 @@ Result<void> unlinkDocRow(ProjectDb& p, std::string_view docKey)
 // Tar bort beräkningen. Stolpar och kopplingar följer med (ON DELETE CASCADE).
 Result<void> removeNormalSpan(ProjectDb& p, std::int64_t id)
 {
-    return write(p, [&](db::Database& d) {
+    return write(p, [&](db::Database& d) -> Result<void> {
+        if (auto g = guardSpanId(d, id, Guard::Remove); !g)
+            return g;
         return run(d, "DELETE FROM normal_span WHERE id = ?1", {id});
     });
 }
@@ -1338,8 +1987,13 @@ ResolvedLineInput resolveLineInput(const linecalc::LineInput& input, std::string
         if (entry.first == spanKey)
             linkedSpan = &entry;
     if (linkedSpan && !linkedSpan->second) {
-        out.issues.push_back(missingIssue(linecalc::LineField::NormalSpan,
-                                          spanRow + " har fel och ger inget aₙ. Rätta den i fliken Normalspann."));
+        const bool automatic = std::find(docs.autoSpanKeys.begin(), docs.autoSpanKeys.end(), spanKey) !=
+                               docs.autoSpanKeys.end();
+        const std::string fix = automatic ? "Rätta sträckan eller stolparna i " +
+                                                std::string(poleTableName(stage)) + "."
+                                          : "Rätta den i fliken Normalspann.";
+        out.issues.push_back(
+            missingIssue(linecalc::LineField::NormalSpan, spanRow + " har fel och ger inget aₙ. " + fix));
     } else if (linkedSpan) {
         out.input.normalSpanM = linkedSpan->second;
         out.sources.push_back({LineSourceField::NormalSpan, spanKey});
@@ -1410,10 +2064,16 @@ linecalc::LineCalculation calculateResolved(const ResolvedLineInput& resolved)
     return out;
 }
 
-// Läser alla linberäkningar, efter id.
+// Läser alla linberäkningar: de automatiska först, sedan de övriga efter id.
 Result<std::vector<LineCalc>> lineCalcs(ProjectDb& p)
 {
+    auto ctx = readAutoContext(p.local());
+    if (!ctx)
+        return ctx.error();
     std::vector<std::int64_t> ids;
+    for (const AutoRow& row : ctx.value().rows)
+        if (row.calcPresent)
+            ids.push_back(row.calcId);
     {
         auto stmt = prepared(p.local(), "SELECT id FROM line_calc ORDER BY id", {});
         if (!stmt)
@@ -1424,7 +2084,9 @@ Result<std::vector<LineCalc>> lineCalcs(ProjectDb& p)
                 return row.error();
             if (!row.value())
                 break;
-            ids.push_back(stmt.value().integer(0));
+            const std::int64_t id = stmt.value().integer(0);
+            if (!autoRowOfCalc(ctx.value(), id))
+                ids.push_back(id);
         }
     }
     std::vector<LineCalc> calcs;
@@ -1432,16 +2094,26 @@ Result<std::vector<LineCalc>> lineCalcs(ProjectDb& p)
         auto calc = readLineCalc(p.local(), id);
         if (!calc)
             return calc.error();
-        if (calc.value())
-            calcs.push_back(std::move(*calc.value()));
+        if (!calc.value())
+            continue;
+        decorateCalc(*calc.value(), ctx.value());
+        calcs.push_back(std::move(*calc.value()));
     }
     return calcs;
 }
 
-// Läser en linberäkning. Tomt svar när id saknas.
+// Läser en linberäkning med märkning och rader som i lineCalcs. Tomt svar när id saknas.
 Result<std::optional<LineCalc>> lineCalc(ProjectDb& p, std::int64_t id)
 {
-    return readLineCalc(p.local(), id);
+    auto ctx = readAutoContext(p.local());
+    if (!ctx)
+        return ctx.error();
+    auto calc = readLineCalc(p.local(), id);
+    if (!calc)
+        return calc.error();
+    if (calc.value())
+        decorateCalc(*calc.value(), ctx.value());
+    return calc;
 }
 
 // Sparar en ny eller befintlig linberäkning med de 15 lastfallen i en transaktion och kopplar
@@ -1450,6 +2122,14 @@ Result<std::int64_t> saveLineCalc(ProjectDb& p, const LineCalc& lc, std::string_
 {
     std::int64_t savedId = 0;
     auto done = write(p, [&](db::Database& d) -> Result<void> {
+        if (auto g = guardCalcId(d, lc.id, Guard::Change); !g)
+            return g;
+        if (!linkDocKey.empty())
+            if (auto g = guardRow(d, linkDocKey); !g)
+                return g;
+        if (lc.id == 0 && !lc.docSource.empty())
+            if (auto g = guardRow(d, lc.docSource); !g)
+                return g;
         if (!allFinite(lc.input))
             return makeError(ErrorCode::Invalid, "Ogiltigt tal.");
         if (!lc.docSource.empty() && !isLineCalcKey(lc.docSource))
@@ -1490,82 +2170,450 @@ Result<std::int64_t> saveLineCalc(ProjectDb& p, const LineCalc& lc, std::string_
 // Kopplar raden docKey till linberäkningen id. Radens manuella värde töms.
 Result<void> linkLineCalc(ProjectDb& p, std::int64_t id, std::string_view docKey)
 {
-    return write(p, [&](db::Database& d) { return linkLineInside(d, id, docKey); });
+    return write(p, [&](db::Database& d) -> Result<void> {
+        if (auto g = guardCalcId(d, id, Guard::Change); !g)
+            return g;
+        if (auto g = guardRow(d, docKey); !g)
+            return g;
+        return linkLineInside(d, id, docKey);
+    });
 }
 
 // Gör en kopplad linberäkning manuell. Kopplingen till raden står kvar.
 Result<void> detachLineCalc(ProjectDb& p, std::int64_t id)
 {
-    return write(p, [&](db::Database& d) { return detachInside(d, id); });
+    return write(p, [&](db::Database& d) -> Result<void> {
+        if (auto g = guardCalcId(d, id, Guard::Change); !g)
+            return g;
+        return detachInside(d, id);
+    });
 }
 
 // Tar bort linberäkningen. Lastfall och kopplingar följer med (ON DELETE CASCADE).
 Result<void> removeLineCalc(ProjectDb& p, std::int64_t id)
 {
-    return write(p, [&](db::Database& d) {
+    return write(p, [&](db::Database& d) -> Result<void> {
+        if (auto g = guardCalcId(d, id, Guard::Remove); !g)
+            return g;
         return run(d, "DELETE FROM line_calc WHERE id = ?1", {id});
     });
 }
 
-// Läser Stolptabell före i tabellens ordning. NULL i en talkolumn blir tom text.
-Result<std::vector<poletable::PoleRow>> polesBefore(ProjectDb& p)
+// Läser stolptabellen för skedet i tabellens ordning. NULL i en talkolumn blir tom text.
+Result<std::vector<poletable::PoleRow>> poles(ProjectDb& p, Stage stage)
 {
-    auto stmt = prepared(p.local(), R"sql(
-SELECT pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl FROM pole_before ORDER BY position
-)sql",
-                         {});
-    if (!stmt)
-        return stmt.error();
-    std::vector<poletable::PoleRow> rows;
-    while (true) {
-        auto step = stmt.value().step();
-        if (!step)
-            return step.error();
-        if (!step.value())
-            break;
-        poletable::PoleRow row;
-        for (int column = 0; column < poletable::kColumnCount; ++column)
-            poletable::field(row, column) = stmt.value().text(column);
-        rows.push_back(std::move(row));
-    }
-    return rows;
+    return readPoles(p.local(), stage);
 }
 
-// Ersätter hela Stolptabell före i en transaktion. Talen valideras först, och en tom rad sist
-// sparas inte. Tomma tal binds som NULL.
-Result<void> setPolesBefore(ProjectDb& p, const std::vector<poletable::PoleRow>& rows)
+namespace {
+
+// Kontrollerar att alla tal i raderna är kanonisk decimaltext. Det första felet ger Invalid med
+// tabellens namn, radens nummer (1-baserat) och kolumnens namn.
+Result<void> validatePoleRows(Stage stage, const std::vector<poletable::PoleRow>& rows)
+{
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (const auto bad = poletable::firstInvalidColumn(rows[i]))
+            return makeError(ErrorCode::Invalid,
+                             std::string(poleTableName(stage)) + " har ett ogiltigt tal på rad " +
+                                 std::to_string(i + 1) + " i kolumnen " + poletable::columnName(*bad) +
+                                 ".");
+    }
+    return {};
+}
+
+// Ersätter raderna i stolptabellen för skedet: tömmer tabellen och skriver poletable::rowsToSave(rows)
+// med positionerna 0, 1, 2 ... Tomma tal binds som NULL. Ingen validering och ingen synkning här.
+Result<void> writePoleRows(db::Database& d, Stage stage, const std::vector<poletable::PoleRow>& rows)
+{
+    const std::string table(poleTableSql(stage));
+    if (auto r = run(d, "DELETE FROM " + table, {}); !r)
+        return r;
+    const std::string insert = "INSERT INTO " + table +
+                               "(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl) "
+                               "VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
+    const std::vector<poletable::PoleRow> toSave = poletable::rowsToSave(rows);
+    std::int64_t position = 0;
+    for (const poletable::PoleRow& row : toSave) {
+        // Tom text i en talkolumn blir NULL, text i textkolumnerna sparas som den är.
+        const auto number = [&](int column) -> Arg {
+            const std::string& text = poletable::field(row, column);
+            return text.empty() ? Arg{nullptr} : Arg{std::string_view(text)};
+        };
+        if (auto r = run(d, insert,
+                         {position, std::string_view(row.pole), number(poletable::kAv),
+                          number(poletable::kAh), number(poletable::kSpan),
+                          number(poletable::kNorth), number(poletable::kEast),
+                          number(poletable::kHeight), std::string_view(row.lkl)});
+            !r)
+            return r;
+        ++position;
+    }
+    return {};
+}
+
+} // namespace
+
+// Ersätter hela stolptabellen för skedet i en transaktion. Talen valideras först, och en tom rad
+// sist sparas inte. Tomma tal binds som NULL. De automatiska beräkningarna följer med.
+Result<void> setPoles(ProjectDb& p, Stage stage, const std::vector<poletable::PoleRow>& rows)
 {
     return write(p, [&](db::Database& d) -> Result<void> {
-        for (std::size_t i = 0; i < rows.size(); ++i) {
-            if (const auto bad = poletable::firstInvalidColumn(rows[i]))
-                return makeError(ErrorCode::Invalid,
-                                 "Stolptabellen har ett ogiltigt tal på rad " + std::to_string(i + 1) +
-                                     " i kolumnen " + poletable::columnName(*bad) + ".");
-        }
-        if (auto r = run(d, "DELETE FROM pole_before", {}); !r)
-            return r;
-        const std::vector<poletable::PoleRow> toSave = poletable::rowsToSave(rows);
-        std::int64_t position = 0;
-        for (const poletable::PoleRow& row : toSave) {
-            // Tom text i en talkolumn blir NULL, text i textkolumnerna sparas som den är.
-            const auto number = [&](int column) -> Arg {
-                const std::string& text = poletable::field(row, column);
-                return text.empty() ? Arg{nullptr} : Arg{std::string_view(text)};
-            };
-            if (auto r = run(d, R"sql(
-INSERT INTO pole_before(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl)
-VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-)sql",
-                             {position, std::string_view(row.pole), number(poletable::kAv),
-                              number(poletable::kAh), number(poletable::kSpan),
-                              number(poletable::kNorth), number(poletable::kEast),
-                              number(poletable::kHeight), std::string_view(row.lkl)});
-                !r)
-                return r;
-            ++position;
-        }
-        return Result<void>{};
+        if (auto v = validatePoleRows(stage, rows); !v)
+            return v;
+        if (auto w = writePoleRows(d, stage, rows); !w)
+            return w;
+        return syncAutoCalcs(d, platform::nowUtcIso());
     });
+}
+
+// Stolptabell före är stolptabellen för skedet före.
+Result<std::vector<poletable::PoleRow>> polesBefore(ProjectDb& p)
+{
+    return poles(p, Stage::Before);
+}
+
+// Ersätter Stolptabell före, som setPoles.
+Result<void> setPolesBefore(ProjectDb& p, const std::vector<poletable::PoleRow>& rows)
+{
+    return setPoles(p, Stage::Before, rows);
+}
+
+// Läser automatiskt läge för skedet. Utan rad i auto_mode: av och inga sträckor.
+Result<AutoSettings> autoSettings(ProjectDb& p, Stage stage)
+{
+    return readAutoSettings(p.local(), stage);
+}
+
+// Sparar läget och sträckorna för skedet (Stolpplats trimmas), och synkar de automatiska
+// beräkningarna i samma transaktion.
+Result<void> setAutoSettings(ProjectDb& p, Stage stage, const AutoSettings& s)
+{
+    return write(p, [&](db::Database& d) -> Result<void> {
+        std::array<std::string, 6> texts;
+        for (std::size_t i = 0; i < s.ranges.size(); ++i) {
+            texts[2 * i] = tabletext::trimmed(s.ranges[i].fromPole);
+            texts[2 * i + 1] = tabletext::trimmed(s.ranges[i].toPole);
+        }
+        if (auto r = run(d, R"sql(
+INSERT INTO auto_mode(stage, enabled, phase_from, phase_to, top_left_from, top_left_to,
+                      top_right_from, top_right_to)
+VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+ON CONFLICT(stage) DO UPDATE SET
+    enabled = excluded.enabled, phase_from = excluded.phase_from, phase_to = excluded.phase_to,
+    top_left_from = excluded.top_left_from, top_left_to = excluded.top_left_to,
+    top_right_from = excluded.top_right_from, top_right_to = excluded.top_right_to
+)sql",
+                         {stageText(stage), std::int64_t{s.enabled ? 1 : 0}, std::string_view(texts[0]),
+                          std::string_view(texts[1]), std::string_view(texts[2]), std::string_view(texts[3]),
+                          std::string_view(texts[4]), std::string_view(texts[5])});
+            !r)
+            return r;
+        return syncAutoCalcs(d, platform::nowUtcIso());
+    });
+}
+
+// Gör Stolptabell efter till en kopia av före: raderna, sträckorna och läget. Det som fanns i
+// efter försvinner, och de automatiska beräkningarna synkas i samma transaktion.
+Result<void> copyBeforeToAfter(ProjectDb& p)
+{
+    return write(p, [&](db::Database& d) -> Result<void> {
+        if (auto r = run(d, "DELETE FROM pole_after", {}); !r)
+            return r;
+        if (auto r = run(d, R"sql(
+INSERT INTO pole_after(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl)
+SELECT position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl FROM pole_before
+)sql",
+                         {});
+            !r)
+            return r;
+        if (auto r = run(d, "DELETE FROM auto_mode WHERE stage = 'after'", {}); !r)
+            return r;
+        if (auto r = run(d, R"sql(
+INSERT INTO auto_mode(stage, enabled, phase_from, phase_to, top_left_from, top_left_to,
+                      top_right_from, top_right_to)
+SELECT 'after', enabled, phase_from, phase_to, top_left_from, top_left_to, top_right_from, top_right_to
+  FROM auto_mode WHERE stage = 'before'
+)sql",
+                         {});
+            !r)
+            return r;
+        return syncAutoCalcs(d, platform::nowUtcIso());
+    });
+}
+
+namespace {
+
+// Fältens namn i pole_import_column.field, i poletable-ordning (kPole … kLkl).
+constexpr std::array<std::string_view, poletable::kColumnCount> kImportFieldNames = {
+    "pole", "coord_n", "coord_e", "coord_h", "span_m", "ah", "av", "lkl"};
+
+// Lagringstexten för en cells slag i pole_import_cell.kind.
+std::string_view importKindText(poletable::ImportCellKind kind)
+{
+    switch (kind) {
+    case poletable::ImportCellKind::Number: return "number";
+    case poletable::ImportCellKind::Bool: return "bool";
+    case poletable::ImportCellKind::Error: return "error";
+    case poletable::ImportCellKind::Text: break;
+    }
+    return "text";
+}
+
+// Cellens slag ur lagringstexten. Tomt svar för en okänd text.
+std::optional<poletable::ImportCellKind> importKindFromText(const std::string& text)
+{
+    if (text == "text")
+        return poletable::ImportCellKind::Text;
+    if (text == "number")
+        return poletable::ImportCellKind::Number;
+    if (text == "bool")
+        return poletable::ImportCellKind::Bool;
+    if (text == "error")
+        return poletable::ImportCellKind::Error;
+    return std::nullopt;
+}
+
+// Felet när rådataposten inte hänger ihop med raderna.
+Error importIncomplete(std::string detail)
+{
+    return makeError(ErrorCode::Invalid, "Importen av stolptabellen är ofullständig och sparades inte.",
+                     std::move(detail));
+}
+
+// Kontrollerar att posten hänger ihop med raderna: lika många, samma Stolpnr, inga tomma rader,
+// unika kolumner, fält och Excelrader, och celler som pekar på kända kolumner.
+Result<void> validateImport(const std::vector<poletable::PoleRow>& rows, const poletable::ImportRecord& record)
+{
+    if (rows.size() != record.rows.size())
+        return importIncomplete("Antalet rader i raderna och i rådata skiljer sig.");
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (rows[i].pole != record.rows[i].pole)
+            return importIncomplete("Stolpnr på rad " + std::to_string(i + 1) + " skiljer sig.");
+        if (poletable::isEmptyRow(rows[i]))
+            return importIncomplete("Rad " + std::to_string(i + 1) + " är tom.");
+    }
+    std::set<int> columns;
+    std::set<int> fields;
+    for (const poletable::ImportColumn& c : record.columns) {
+        if (!columns.insert(c.column).second)
+            return importIncomplete("Kolumn " + std::to_string(c.column) + " finns flera gånger.");
+        if (c.field >= poletable::kColumnCount || c.field < -1)
+            return importIncomplete("Okänt fält för kolumn " + std::to_string(c.column) + ".");
+        if (c.field >= 0 && !fields.insert(c.field).second)
+            return importIncomplete("Fältet " + std::string(kImportFieldNames[c.field]) +
+                                    " har flera kolumner.");
+    }
+    std::set<int> excelRows;
+    for (const poletable::ImportRow& r : record.rows) {
+        if (!excelRows.insert(r.excelRow).second)
+            return importIncomplete("Excelrad " + std::to_string(r.excelRow) + " finns flera gånger.");
+        std::set<int> cellColumns;
+        for (const poletable::ImportCell& cell : r.cells) {
+            if (!columns.contains(cell.column))
+                return importIncomplete("En cell på rad " + std::to_string(r.excelRow) +
+                                        " pekar på en kolumn som saknas.");
+            if (!cellColumns.insert(cell.column).second)
+                return importIncomplete("Kolumn " + std::to_string(cell.column) + " finns flera gånger på rad " +
+                                        std::to_string(r.excelRow) + ".");
+        }
+    }
+    return {};
+}
+
+// Skriver posten: tömmer de fyra tabellerna (celler först) och lägger in raden, kolumnerna, raderna
+// och cellerna med en förberedd sats per tabell. Tidpunkten är importedUtc.
+Result<void> writeImportRecord(db::Database& d, const poletable::ImportRecord& record,
+                               const std::string& importedUtc)
+{
+    for (const char* table : {"pole_import_cell", "pole_import_row", "pole_import_column", "pole_import"})
+        if (auto r = run(d, std::string("DELETE FROM ") + table, {}); !r)
+            return r;
+
+    if (auto r = run(d, R"sql(
+INSERT INTO pole_import(id, file_name, sheet_name, title, version, imported_utc, header_first_row,
+                        header_last_row, first_data_row, from_pole, to_pole)
+VALUES(1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+)sql",
+                     {std::string_view(record.fileName), std::string_view(record.sheetName),
+                      std::string_view(record.title), std::string_view(record.version),
+                      std::string_view(importedUtc), std::int64_t{record.headerFirstRow},
+                      std::int64_t{record.headerLastRow}, std::int64_t{record.firstDataRow},
+                      std::string_view(record.fromPole), std::string_view(record.toPole)});
+        !r)
+        return r;
+
+    auto columnStmt = d.prepare("INSERT INTO pole_import_column(col, letter, header, field) VALUES(?1, ?2, ?3, ?4)");
+    if (!columnStmt)
+        return columnStmt.error();
+    for (const poletable::ImportColumn& c : record.columns) {
+        db::Statement& s = columnStmt.value();
+        s.bind(1, std::int64_t{c.column}).bind(2, c.letter).bind(3, c.header);
+        if (c.field >= 0)
+            s.bind(4, kImportFieldNames[c.field]);
+        else
+            s.bindNull(4);
+        if (auto r = s.run(); !r)
+            return r;
+        s.reset();
+    }
+
+    auto rowStmt = d.prepare("INSERT INTO pole_import_row(excel_row, position, pole) VALUES(?1, ?2, ?3)");
+    if (!rowStmt)
+        return rowStmt.error();
+    auto cellStmt = d.prepare("INSERT INTO pole_import_cell(excel_row, col, kind, text) VALUES(?1, ?2, ?3, ?4)");
+    if (!cellStmt)
+        return cellStmt.error();
+    std::int64_t position = 0;
+    for (const poletable::ImportRow& row : record.rows) {
+        db::Statement& rs = rowStmt.value();
+        rs.bind(1, std::int64_t{row.excelRow}).bind(2, position).bind(3, row.pole);
+        if (auto r = rs.run(); !r)
+            return r;
+        rs.reset();
+        ++position;
+        for (const poletable::ImportCell& cell : row.cells) {
+            db::Statement& cs = cellStmt.value();
+            cs.bind(1, std::int64_t{row.excelRow})
+                .bind(2, std::int64_t{cell.column})
+                .bind(3, importKindText(cell.kind))
+                .bind(4, cell.text);
+            if (auto r = cs.run(); !r)
+                return r;
+            cs.reset();
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+// Ersätter Stolptabell före och importens rådata i EN transaktion. Kontrollerna kommer först och
+// inget skrivs när de felar. Synkningen av de automatiska beräkningarna körs sist.
+Result<void> importPolesBefore(ProjectDb& p, const std::vector<poletable::PoleRow>& rows,
+                               const poletable::ImportRecord& record)
+{
+    return write(p, [&](db::Database& d) -> Result<void> {
+        if (auto v = validateImport(rows, record); !v)
+            return v;
+        if (auto v = validatePoleRows(Stage::Before, rows); !v)
+            return v;
+        if (auto w = writePoleRows(d, Stage::Before, rows); !w)
+            return w;
+        if (auto w = writeImportRecord(d, record, platform::nowUtcIso()); !w)
+            return w;
+        return syncAutoCalcs(d, platform::nowUtcIso());
+    });
+}
+
+namespace {
+
+// Felet när rådata i projektfilen inte går att tolka.
+Error importDamaged()
+{
+    return makeError(ErrorCode::Invalid, "Importens rådata i projektfilen är skadad.");
+}
+
+} // namespace
+
+// Läser den senaste importens rådata: posten, kolumnerna, raderna i platsordning och cellerna i
+// kolumnordning. Utan rad i pole_import blir svaret tomt.
+Result<std::optional<poletable::ImportRecord>> lastPoleImport(ProjectDb& p)
+{
+    db::Database& d = p.local();
+    poletable::ImportRecord record;
+    {
+        auto stmt = d.prepare(R"sql(
+SELECT file_name, sheet_name, title, version, imported_utc, header_first_row, header_last_row,
+       first_data_row, from_pole, to_pole
+FROM pole_import WHERE id = 1
+)sql");
+        if (!stmt)
+            return stmt.error();
+        auto row = stmt.value().step();
+        if (!row)
+            return row.error();
+        if (!row.value())
+            return std::optional<poletable::ImportRecord>{};
+        const db::Statement& s = stmt.value();
+        record.fileName = s.text(0);
+        record.sheetName = s.text(1);
+        record.title = s.text(2);
+        record.version = s.text(3);
+        record.importedUtc = s.text(4);
+        record.headerFirstRow = static_cast<int>(s.integer(5));
+        record.headerLastRow = static_cast<int>(s.integer(6));
+        record.firstDataRow = static_cast<int>(s.integer(7));
+        record.fromPole = s.text(8);
+        record.toPole = s.text(9);
+    }
+    {
+        auto stmt = d.prepare("SELECT col, letter, header, field FROM pole_import_column ORDER BY col");
+        if (!stmt)
+            return stmt.error();
+        while (true) {
+            auto row = stmt.value().step();
+            if (!row)
+                return row.error();
+            if (!row.value())
+                break;
+            const db::Statement& s = stmt.value();
+            poletable::ImportColumn c;
+            c.column = static_cast<int>(s.integer(0));
+            c.letter = s.text(1);
+            c.header = s.text(2);
+            if (!s.isNull(3)) {
+                const std::string name = s.text(3);
+                c.field = -1;
+                for (int f = 0; f < poletable::kColumnCount; ++f)
+                    if (kImportFieldNames[static_cast<std::size_t>(f)] == name)
+                        c.field = f;
+                if (c.field < 0)
+                    return importDamaged();
+            }
+            record.columns.push_back(std::move(c));
+        }
+    }
+    std::map<int, std::size_t> rowIndex;
+    {
+        auto stmt = d.prepare("SELECT excel_row, pole FROM pole_import_row ORDER BY position");
+        if (!stmt)
+            return stmt.error();
+        while (true) {
+            auto row = stmt.value().step();
+            if (!row)
+                return row.error();
+            if (!row.value())
+                break;
+            poletable::ImportRow r;
+            r.excelRow = static_cast<int>(stmt.value().integer(0));
+            r.pole = stmt.value().text(1);
+            rowIndex[r.excelRow] = record.rows.size();
+            record.rows.push_back(std::move(r));
+        }
+    }
+    {
+        auto stmt = d.prepare("SELECT excel_row, col, kind, text FROM pole_import_cell ORDER BY excel_row, col");
+        if (!stmt)
+            return stmt.error();
+        while (true) {
+            auto row = stmt.value().step();
+            if (!row)
+                return row.error();
+            if (!row.value())
+                break;
+            const db::Statement& s = stmt.value();
+            const auto kind = importKindFromText(s.text(2));
+            const auto at = rowIndex.find(static_cast<int>(s.integer(0)));
+            if (!kind || at == rowIndex.end())
+                return importDamaged();
+            poletable::ImportCell cell;
+            cell.column = static_cast<int>(s.integer(1));
+            cell.kind = *kind;
+            cell.text = s.text(3);
+            record.rows[at->second].cells.push_back(std::move(cell));
+        }
+    }
+    return std::optional<poletable::ImportRecord>{std::move(record)};
 }
 
 } // namespace kalkyl::projectdb

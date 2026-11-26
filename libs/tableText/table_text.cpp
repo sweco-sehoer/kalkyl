@@ -55,12 +55,22 @@ std::string stripBlanks(std::string_view text)
     return clean;
 }
 
+// Sant när texten, trimmad i ändarna, har en tabb eller radbrytning mitt i. Ett sådant fält är
+// aldrig ett tal: "256", radbrytning, "256" ur en Excelcell med två rader är två värden.
+bool hasInnerBreak(std::string_view text)
+{
+    const std::string inner = trimmed(text);
+    return inner.find_first_of(std::string{char{9}, char{10}, char{13}}) != std::string::npos;
+}
+
 } // namespace
 
 // Tolkar ett tal ur inmatad eller inklistrad text. Först rensas blanktecken (också hårt och smalt
 // mellanslag), tecknet läses (också U+2212) och komma görs till punkt. Hela texten måste vara ett tal.
 std::optional<double> parseDecimal(std::string_view text)
 {
+    if (hasInnerBreak(text))
+        return std::nullopt;
     const std::string clean = stripBlanks(text);
     if (clean.empty())
         return std::nullopt;
@@ -130,6 +140,8 @@ std::string formatDecimal(double value, int decimals, char separator)
 // Inledande nollor i heltalsdelen stryks och decimalerna behålls exakt som de skrevs.
 std::optional<std::string> normalizeDecimal(std::string_view text)
 {
+    if (hasInnerBreak(text))
+        return std::nullopt;
     const std::string clean = stripBlanks(text);
     if (clean.empty())
         return std::string();

@@ -3,6 +3,7 @@
 Excel-beteendet i en GlazeUI DataGrid: rektangulär markering med Shift och Shift+klick, Ctrl+C, X, V, A, Delete och snabbmenyn.
 Biblioteket heter `kalkyl_sheetgrid`, namnrymden `kalkyl::sheetgrid` och includes skrivs `"sheetGrid/sheet_grid.h"`.
 Det beror på `glaze` (PUBLIC) och `kalkyl_tabletext` (PRIVATE).
+Används av Linberäkning och `libs/poleGrid` (Stolptabell före och efter).
 
 | Fil | Innehåll |
 |---|---|

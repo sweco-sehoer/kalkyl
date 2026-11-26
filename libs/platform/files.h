@@ -46,6 +46,10 @@ core::Result<void> removeFile(const std::string& path);
 core::Result<void> copyFile(const std::string& from, const std::string& to,
                             const Progress& progress, std::stop_token stop);
 core::Result<void> flushFile(const std::string& path);         // öppna + FlushFileBuffers + stäng
+// Läser hela filen i minnet med delad åtkomst (GENERIC_READ och FILE_SHARE_READ, WRITE och DELETE),
+// så att en fil som är öppen i Excel går att läsa. En fil som är större än maxBytes ger Invalid.
+// Övriga fel som win32Error (NotFound, AccessDenied, Busy, Unreachable, Io).
+core::Result<std::string> readFileShared(const std::string& path, std::uint64_t maxBytes);
 // MoveFileExW(MOVEFILE_WRITE_THROUGH). AlreadyExists om målet finns.
 core::Result<void> moveNew(const std::string& from, const std::string& to);
 // MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH). Vid delningsfel 3 försök × 500 ms, sedan Busy.

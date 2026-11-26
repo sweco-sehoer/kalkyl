@@ -161,4 +161,100 @@ CREATE TABLE IF NOT EXISTS pole_before (
 );
 )sql";
 
+// Steg 5 (user_version 4 -> 5): Stolptabell efter, automatiskt läge och märkningen av de
+// automatiska beräkningarna. IF NOT EXISTS som i steg 2. De automatiska beräkningarna är vanliga
+// rader i normal_span och line_calc; auto_calc säger vilka och reserverar deras id.
+inline constexpr std::string_view kStep5 = R"sql(
+-- Fliken Stolptabell efter: som pole_before, en rad per stolpe i tabellens ordning
+-- (position 0, 1, 2 ...), också tomma rader mitt i tabellen. Talen är kanonisk decimaltext.
+-- NULL = tom cell.
+CREATE TABLE IF NOT EXISTS pole_after (
+    position INTEGER PRIMARY KEY,
+    pole     TEXT    NOT NULL DEFAULT '',
+    av       TEXT,
+    ah       TEXT,
+    span_m   TEXT,
+    coord_n  TEXT,
+    coord_e  TEXT,
+    coord_h  TEXT,
+    lkl      TEXT    NOT NULL DEFAULT ''
+);
+-- Automatiskt läge per stolptabell: på eller av, och var faslinan och topplinorna börjar och
+-- slutar (Stolpplats, '' = inte vald). top_left är Topplinor när topplina höger är Samma.
+-- Saknas raden är läget av och inga sträckor valda.
+CREATE TABLE IF NOT EXISTS auto_mode (
+    stage          TEXT    PRIMARY KEY NOT NULL CHECK (stage IN ('before', 'after')),
+    enabled        INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+    phase_from     TEXT    NOT NULL DEFAULT '',
+    phase_to       TEXT    NOT NULL DEFAULT '',
+    top_left_from  TEXT    NOT NULL DEFAULT '',
+    top_left_to    TEXT    NOT NULL DEFAULT '',
+    top_right_from TEXT    NOT NULL DEFAULT '',
+    top_right_to   TEXT    NOT NULL DEFAULT ''
+);
+-- De automatiska beräkningarna: en rad per skede och lina som någon gång har varit automatisk.
+-- span_id och calc_id är id i normal_span och line_calc. De är reserverade för skedet och linan:
+-- raderna där finns bara när linan är automatisk och skapas igen med samma id. Ingen främmande
+-- nyckel, eftersom raderna tas bort när läget är av. first_row, last_row och issue är sträckan
+-- som den senast lästes ur stolptabellen (-1 och felets text när den inte går att använda).
+CREATE TABLE IF NOT EXISTS auto_calc (
+    stage     TEXT    NOT NULL CHECK (stage IN ('before', 'after')),
+    wire      TEXT    NOT NULL CHECK (wire IN ('phase', 'top_left', 'top_right')),
+    span_id   INTEGER NOT NULL UNIQUE,
+    calc_id   INTEGER NOT NULL UNIQUE,
+    first_row INTEGER NOT NULL DEFAULT -1,
+    last_row  INTEGER NOT NULL DEFAULT -1,
+    issue     TEXT    NOT NULL DEFAULT '',
+    PRIMARY KEY (stage, wire)
+);
+)sql";
+
+// Steg 6 (user_version 5 -> 6): importens rådata, de fyra tabellerna pole_import*. Ett eget steg,
+// eftersom projekt med user_version 5 och bara tabellerna i steg 5 redan finns. IF NOT EXISTS som
+// i steg 2.
+inline constexpr std::string_view kStep6 = R"sql(
+-- Den senaste importen av en stolptabell till Stolptabell före: en rad (id = 1) med filens namn
+-- (inte sökvägen), bladet, titeln och versionen ("Ver. 6"), tidpunkten (UTC), rubrikområdet,
+-- första dataraden och sträckan som importerades. Saknas raden har ingen import gjorts.
+CREATE TABLE IF NOT EXISTS pole_import (
+    id               INTEGER PRIMARY KEY CHECK (id = 1),
+    file_name        TEXT    NOT NULL,
+    sheet_name       TEXT    NOT NULL,
+    title            TEXT    NOT NULL DEFAULT '',
+    version          TEXT    NOT NULL DEFAULT '',
+    imported_utc     TEXT    NOT NULL,
+    header_first_row INTEGER NOT NULL,
+    header_last_row  INTEGER NOT NULL,
+    first_data_row   INTEGER NOT NULL,
+    from_pole        TEXT    NOT NULL DEFAULT '',
+    to_pole          TEXT    NOT NULL DEFAULT ''
+);
+-- Kolumnerna i den importerade filen: numret (1 = A), bokstäverna, rubriken (rubrikraderna
+-- uppifrån med " › " emellan, sammanslagna celler ifyllda) och fältet i Stolptabell före som
+-- kolumnen gav, med pole_before-kolumnens namn. NULL för kolumner som inte gav något fält.
+CREATE TABLE IF NOT EXISTS pole_import_column (
+    col    INTEGER PRIMARY KEY,
+    letter TEXT    NOT NULL,
+    header TEXT    NOT NULL DEFAULT '',
+    field  TEXT    UNIQUE CHECK (field IN ('pole', 'coord_n', 'coord_e', 'coord_h', 'span_m', 'ah', 'av', 'lkl'))
+);
+-- De importerade raderna: Excels radnummer, platsen i Stolptabell före vid importen (0, 1, 2 ...)
+-- och Stolpnr som det blev där.
+CREATE TABLE IF NOT EXISTS pole_import_row (
+    excel_row INTEGER PRIMARY KEY,
+    position  INTEGER NOT NULL UNIQUE,
+    pole      TEXT    NOT NULL
+);
+-- Cellerna på de importerade raderna, alla kolumner som har ett värde. text är värdet som det står
+-- i filen: texten med radbrytningar, talet med punkt och alla decimaler, sant/falskt som 1/0 och
+-- felet som #N/A. kind är cellens slag.
+CREATE TABLE IF NOT EXISTS pole_import_cell (
+    excel_row INTEGER NOT NULL REFERENCES pole_import_row(excel_row) ON DELETE CASCADE,
+    col       INTEGER NOT NULL REFERENCES pole_import_column(col) ON DELETE CASCADE,
+    kind      TEXT    NOT NULL CHECK (kind IN ('text', 'number', 'bool', 'error')),
+    text      TEXT    NOT NULL,
+    PRIMARY KEY (excel_row, col)
+) WITHOUT ROWID;
+)sql";
+
 } // namespace kalkyl::projectdb::dev

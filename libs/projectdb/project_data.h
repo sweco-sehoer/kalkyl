@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -7,9 +8,11 @@
 #include <vector>
 
 #include "anCalc/normal_span.h"
+#include "autoMode/auto_mode.h"
 #include "conductor/conductor.h"
 #include "core/result.h"
 #include "lineCalc/line_calc.h"
+#include "poleTable/import_record.h"
 #include "poleTable/pole_table.h"
 #include "projectdb/project_db.h"
 
@@ -33,6 +36,17 @@ enum class Stage { Before, After };
 // Nyckeln för normalspannsraden, t.ex. "ns_calc_top_left_after".
 std::string normalSpanDocKey(Wire wire, Stage stage);
 
+// Var en automatisk beräkning kommer ifrån (planen Automatiskt läge, 4.1). Satt bara på de
+// automatiska, som projectdb skapar, håller aktuella och tar bort (syncAutoCalcs).
+struct AutoOrigin {
+    Stage stage = Stage::Before;
+    Wire wire = Wire::Phase;
+    automode::PoleRange range;
+    int firstRow = -1;      // sträckans första rad i stolptabellen, -1 när sträckan har fel
+    int lastRow = -1;       // sträckans sista rad, -1 när sträckan har fel
+    std::string issue;      // sträckans fel (automode::findRange), tomt när den gick att läsa
+};
+
 // En normalspannsberäkning: indata och gränser, utan lina. Resultatet räknas med
 // ancalc::calculateNormalSpan och lagras aldrig.
 struct NormalSpan {
@@ -43,6 +57,7 @@ struct NormalSpan {
     std::vector<std::string> docKeys;               // raderna som visar den; bara vid läsning
     std::string createdUtc;                         // sätts vid sparning
     std::string modifiedUtc;
+    std::optional<AutoOrigin> automatic;            // satt för en automatisk beräkning
 };
 
 // Alla uppgifter i Dokumentation, i nyckelordning.
@@ -63,9 +78,25 @@ core::Result<void> setDocConductor(ProjectDb& p, std::string_view key,
 // Namn och id behålls. Fel: AccessDenied, NotFound (ingen sådan lina), Invalid, Sql.
 core::Result<void> refreshProjectConductor(ProjectDb& p, const conductor::Conductor& fresh);
 
-// Alla beräkningar med stolpar och rader, efter id.
+// Räknar normalspannet för en beräkning: sträckans fel för en automatisk beräkning vars sträcka
+// inte går att använda, annars ancalc::calculateNormalSpan på stolparna och gränserna.
+ancalc::SpanCalculation calculateSpan(const NormalSpan& ns);
+
+// Tabellens namn i texterna: "Stolptabell före" eller "Stolptabell efter".
+std::string_view poleTableName(Stage stage);
+
+// Linans ord i automatiska lägets texter: "faslinan", "topplinorna" (same: topplina höger är
+// Samma), "topplina vänster" eller "topplina höger".
+std::string autoLineWord(Wire wire, bool same);
+
+// Linans rubrik i panelen: "Faslina", "Topplinor" (same), "Topplina vänster" eller "Topplina höger".
+std::string autoLineLabel(Wire wire, bool same);
+
+// Alla beräkningar med stolpar och rader. Först de automatiska (före och sedan efter, i varje
+// skede Phase, TopLeft och TopRight), sedan de övriga efter id. De övrigas docKeys saknar rader
+// som visar en automatisk beräkning.
 core::Result<std::vector<NormalSpan>> normalSpans(ProjectDb& p);
-// En beräkning. Tomt svar om id saknas.
+// En beräkning, med automatic och docKeys som i normalSpans. Tomt svar om id saknas.
 core::Result<std::optional<NormalSpan>> normalSpan(ProjectDb& p, std::int64_t id);
 // Ny (id 0) eller ersätter beräkningen och alla dess stolpar, i EN transaktion, och svarar
 // med id. Helt tomma stolpar sparas inte; positionerna blir 0, 1, 2 ... Är linkDocKey satt
@@ -103,15 +134,19 @@ struct LineCalc {
     std::vector<std::string> docKeys;        // raderna som visar den; bara vid läsning
     std::string createdUtc;                  // sätts vid sparning
     std::string modifiedUtc;
+    std::optional<AutoOrigin> automatic;     // satt för en automatisk beräkning
 };
 
 // Det i Dokumentation som en kopplad linberäkning hämtar: uppgifterna, projektets linor och
-// aₙ för varje normalspannsrad med en kopplad beräkning. Läses en gång per omräkning.
+// aₙ för varje normalspannsrad med en kopplad eller automatisk beräkning. Läses en gång per omräkning.
 struct DocLineSources {
     std::vector<DocValue> values;                  // som docValues
     std::vector<conductor::Conductor> conductors;  // som projectConductors
-    // aₙ (avrundat till 0,1 m) per normalspannsnyckel med kopplad beräkning; tomt = fel
+    // aₙ (avrundat till 0,1 m) per normalspannsnyckel med kopplad eller automatisk beräkning;
+    // tomt = fel. En tagen rad (automatisk beräkning) räknas bara med sin automatiska beräkning.
     std::vector<std::pair<std::string, std::optional<double>>> normalSpans;
+    // Normalspannsnycklarna vars aₙ kommer ur en automatisk beräkning (för upplysningens text)
+    std::vector<std::string> autoSpanKeys;
 };
 core::Result<DocLineSources> docLineSources(ProjectDb& p);
 
@@ -135,9 +170,11 @@ ResolvedLineInput resolveLineInput(const linecalc::LineInput& input, std::string
 // räkna, och calculateLine:s Missing för samma fält tas bort.
 linecalc::LineCalculation calculateResolved(const ResolvedLineInput& resolved);
 
-// Alla linberäkningar med lastfall och rader, efter id.
+// Alla linberäkningar med lastfall och rader. Först de automatiska (före och sedan efter, i varje
+// skede Phase, TopLeft och TopRight, docKeys = den egna raden), sedan de övriga efter id. De
+// övrigas docKeys saknar rader som visar en automatisk beräkning.
 core::Result<std::vector<LineCalc>> lineCalcs(ProjectDb& p);
-// En linberäkning. Tomt svar om id saknas.
+// En linberäkning, med automatic och docKeys som i lineCalcs. Tomt svar om id saknas.
 core::Result<std::optional<LineCalc>> lineCalc(ProjectDb& p, std::int64_t id);
 // Ny (id 0) eller ersätter beräkningen och dess 15 lastfall, i EN transaktion, och svarar med id.
 // linkDocKey kopplar den till raden (som linkLineCalc). En kopplad beräkning kopplas till
@@ -156,12 +193,50 @@ core::Result<void> detachLineCalc(ProjectDb& p, std::int64_t id);
 // Fel: AccessDenied, Sql.
 core::Result<void> removeLineCalc(ProjectDb& p, std::int64_t id);
 
-// Stolptabellen i fliken Stolptabell före, i tabellens ordning. En tom tabell ger en tom lista.
+// Stolptabellen för skedet i tabellens ordning. En tom tabell ger en tom lista.
+core::Result<std::vector<poletable::PoleRow>> poles(ProjectDb& p, Stage stage);
+// Ersätter hela stolptabellen för skedet i EN transaktion med poletable::rowsToSave(rows): tomma
+// rader mitt i sparas, tomma rader sist inte. Positionerna blir 0, 1, 2 ... Talen ska vara
+// kanonisk decimaltext (poletable::acceptField). De automatiska beräkningarna följer med i samma
+// transaktion. Fel: AccessDenied, Invalid ("Stolptabell före har ett ogiltigt tal på rad <n> i
+// kolumnen <namn>." respektive "Stolptabell efter …"), Sql.
+core::Result<void> setPoles(ProjectDb& p, Stage stage, const std::vector<poletable::PoleRow>& rows);
+
+// Stolptabell före: poles(p, Stage::Before) respektive setPoles(p, Stage::Before, rows).
 core::Result<std::vector<poletable::PoleRow>> polesBefore(ProjectDb& p);
-// Ersätter hela Stolptabell före i EN transaktion med poletable::rowsToSave(rows): tomma rader
-// mitt i sparas, tomma rader sist inte. Positionerna blir 0, 1, 2 ... Talen ska vara kanonisk
-// decimaltext (poletable::acceptField).
-// Fel: AccessDenied, Invalid ("Stolptabellen har ett ogiltigt tal på rad <n> i kolumnen <namn>."), Sql.
 core::Result<void> setPolesBefore(ProjectDb& p, const std::vector<poletable::PoleRow>& rows);
+
+// Automatiskt läge för en stolptabell: på eller av, och en sträcka per lina i Wire-ordningen
+// (Phase, TopLeft, TopRight). TopLeft är Topplinor när topplina höger är Samma. TopRight används
+// bara när topplina höger är en egen lina, men sparas ändå.
+struct AutoSettings {
+    bool enabled = false;
+    std::array<automode::PoleRange, 3> ranges;
+    bool operator==(const AutoSettings&) const = default;
+};
+// Inställningen för skedet. Utan rad i auto_mode: av och inga sträckor.
+core::Result<AutoSettings> autoSettings(ProjectDb& p, Stage stage);
+// Sparar inställningen (Stolpplats trimmas), och de automatiska beräkningarna följer med i samma
+// transaktion. Fel: AccessDenied, Sql.
+core::Result<void> setAutoSettings(ProjectDb& p, Stage stage, const AutoSettings& s);
+// Stolptabell efter blir en kopia av Stolptabell före: alla rader, sträckorna och läget, i EN
+// transaktion med de automatiska beräkningarna. Det som fanns i efter försvinner.
+// Fel: AccessDenied, Sql.
+core::Result<void> copyBeforeToAfter(ProjectDb& p);
+
+// Stolptabell före ur en importerad fil: raderna som setPoles(p, Stage::Before, rows) och importens
+// rådata (pole_import, pole_import_column, pole_import_row och pole_import_cell), som ersätter den
+// förra importens. Allt sker i EN transaktion, med synkningen av de automatiska beräkningarna sist.
+// record.rows har en post per rad i rows med samma Stolpnr, och rows har inga tomma rader.
+// importedUtc sätts här. Inget annat ändras: Stolptabell efter, automatiskt läge med sträckorna,
+// Dokumentation, linkopiorna och beräkningarna står kvar, utom det synkningen skriver.
+// Fel: AccessDenied, Invalid (ogiltigt tal som i setPoles, eller "Importen av stolptabellen är
+// ofullständig och sparades inte."), Sql.
+core::Result<void> importPolesBefore(ProjectDb& p, const std::vector<poletable::PoleRow>& rows,
+                                     const poletable::ImportRecord& record);
+
+// Den senaste importens rådata, eller tomt svar när ingen import har gjorts. Kolumnerna i
+// kolumnordning, raderna i platsordning och cellerna i kolumnordning. Fel: Sql.
+core::Result<std::optional<poletable::ImportRecord>> lastPoleImport(ProjectDb& p);
 
 } // namespace kalkyl::projectdb

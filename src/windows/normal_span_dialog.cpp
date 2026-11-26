@@ -169,6 +169,8 @@ void NormalSpanDialog::onLoad(glaze::Widget*, glaze::EventArgs&)
     }
     if (readOnly_)
         applyReadOnly();
+    if (automatic_)
+        setTitle("Normalspannsberäkning (automatisk)");
     recalc();
     if (copyOfId_ != 0) {
         std::string note = noteTxt.text();
@@ -377,6 +379,7 @@ bool NormalSpanDialog::loadCalculation()
     std::vector<glaze::DataGrid::Row> rows;
     std::vector<std::string> docKeys;
     const std::int64_t id = existingId_ != 0 ? existingId_ : copyOfId_;
+    automatic_.reset();
 
     if (id != 0) {
         auto loaded = projectdb::normalSpan(*project_, id);
@@ -392,6 +395,11 @@ bool NormalSpanDialog::loadCalculation()
             return false;
         }
         const projectdb::NormalSpan& ns = *loaded.value();
+        // En automatisk beräkning visas bara, den ändras i stolptabellen.
+        if (existingId_ != 0 && ns.automatic) {
+            automatic_ = ns.automatic;
+            readOnly_ = true;
+        }
         noteTxt.setText(ns.note);
         lim1Spin.setValue(ns.limits.longest);
         lim2Spin.setValue(ns.limits.shortest);
@@ -418,6 +426,7 @@ bool NormalSpanDialog::loadCalculation()
 }
 
 // Skriver upplysningen om var beräkningen visas i Dokumentation, efter hur den öppnats.
+// En automatisk beräkning får i stället en text om stolptabellen och sträckan.
 void NormalSpanDialog::updateDocLabel(const std::vector<std::string>& docKeys)
 {
     const auto labelOf = [this](const std::string& key) {
@@ -427,6 +436,24 @@ void NormalSpanDialog::updateDocLabel(const std::vector<std::string>& docKeys)
         return key;
     };
 
+    if (automatic_) {
+        std::string text = "Automatisk beräkning ur " + std::string(projectdb::poleTableName(automatic_->stage)) +
+                           ": " + automatic_->range.fromPole + " – " + automatic_->range.toPole +
+                           ". Den följer tabellen och ändras där, och den kan inte tas bort.";
+        if (!automatic_->issue.empty())
+            text += " Sträckan går inte att använda: " + automatic_->issue;
+        std::string joined;
+        for (const auto& key : docKeys) {
+            if (!joined.empty())
+                joined += ", ";
+            joined += labelOf(key);
+        }
+        if (!joined.empty())
+            text += " Visas i Dokumentation på: " + joined;
+        docLbl.setWrap(true);   // texten är lång: bryts mot bredden
+        docLbl.setText(text);
+        return;
+    }
     if (existingId_ != 0) {
         if (docKeys.empty()) {
             docLbl.setText("Visas inte i Dokumentation. Koppla den med högerklick på en normalspannsrad i fliken Dokumentation.");
@@ -507,6 +534,9 @@ void NormalSpanDialog::recalc()
     std::vector<ancalc::SpanIssue> gridIssues;
     const std::vector<ancalc::SpanPole> poles = readPoles(gridIssues);
     calc_ = ancalc::calculateNormalSpan(poles, readLimits());
+    // En automatisk beräkning vars sträcka har fel visar sträckans fel, inte "för få stolpar".
+    if (automatic_ && !automatic_->issue.empty())
+        calc_ = {std::nullopt, {{ancalc::IssueKind::Error, -1, ancalc::SpanColumn::None, automatic_->issue}}};
 
     issues_ = std::move(gridIssues);
     issues_.insert(issues_.end(), calc_.issues.begin(), calc_.issues.end());

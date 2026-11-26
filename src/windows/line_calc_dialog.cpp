@@ -733,10 +733,12 @@ void LineCalcDialog::onLoad(glaze::Widget*, glaze::EventArgs&)
         docRowKey_ = existingDocKeys_.front();
     else if (existingId_ == 0 && copyOfId_ == 0)
         docRowKey_ = linkDocKey_;
-    if (docRowKey_.empty())
+    if (docRowKey_.empty() || automatic_)
         docInputChk.hide();
     else
         docInputChk.setChecked(!lc_.docSource.empty());
+    if (automatic_)
+        setTitle("Linberäkning (automatisk)");
 
     buildTables();
     if (readOnly_)
@@ -973,6 +975,7 @@ bool LineCalcDialog::loadCalculation()
     const std::int64_t id = existingId_ != 0 ? existingId_ : copyOfId_;
     lc_ = {};
     existingDocKeys_.clear();
+    automatic_.reset();
     if (id != 0) {
         const auto loaded = projectdb::lineCalc(*project_, id);
         if (!loaded) {
@@ -988,7 +991,12 @@ bool LineCalcDialog::loadCalculation()
         lc_ = *loaded.value();
         if (existingId_ != 0) {
             existingDocKeys_ = lc_.docKeys;
+            // En automatisk beräkning visas bara, den ändras i stolptabellen.
+            automatic_ = lc_.automatic;
+            if (automatic_)
+                readOnly_ = true;
         } else {
+            lc_.automatic.reset();
             // En kopia är lös och manuell, och en kopplad beräkning behåller sina upplösta värden.
             if (!lc_.docSource.empty())
                 lc_.input = projectdb::resolveLineInput(lc_.input, lc_.docSource, docs_).input;
@@ -1148,10 +1156,20 @@ std::string LineCalcDialog::docRowLabel(const std::string& key) const
 }
 
 // Skriver upplysningen om var beräkningen visas i Dokumentation, och om att linan, aₙ, σ₀
-// och temperaturerna är Dokumentationens när beräkningen är kopplad.
+// och temperaturerna är Dokumentationens när beräkningen är kopplad. En automatisk
+// beräkning får i stället en text om stolptabellen den räknas ur.
 void LineCalcDialog::updateDocLabel()
 {
     std::string text;
+    if (automatic_) {
+        text = "Automatisk linberäkning ur " + std::string(projectdb::poleTableName(automatic_->stage)) +
+               ". Linan, σ₀ och temperaturerna är Dokumentationens, och aₙ kommer ur den automatiska "
+               "normalspannsberäkningen (" + automatic_->range.fromPole + " – " + automatic_->range.toPole +
+               "). Den kan inte ändras eller tas bort.";
+        docLbl.setWrap(true);   // texten är lång: bryts mot bredden
+        docLbl.setText(text);
+        return;
+    }
     if (existingId_ != 0) {
         if (existingDocKeys_.empty()) {
             text = "Visas inte i Dokumentation. Koppla den med högerklick på en rad Linberäkning … i fliken Dokumentation.";

@@ -143,6 +143,15 @@ void testCanonicalDecimal()
     CHECK(normalizeDecimal("   ") == Text(""));
     CHECK(normalizeDecimal(nbsp + narrow) == Text(""));
     CHECK(normalizeDecimal(" 12 " + std::string(1, char{9}) + " ") == Text("12"));
+    // Tabb eller radbrytning mitt i (en Excelcell med två rader) är aldrig ett tal; i ändarna trimmas de.
+    const std::string lfIn(1, char{10});
+    CHECK(!normalizeDecimal("256" + lfIn + "256"));
+    CHECK(!normalizeDecimal("256" + lfIn + lfIn + "256"));
+    CHECK(!normalizeDecimal("12" + std::string(1, char{9}) + "5"));
+    CHECK(!normalizeDecimal("1" + std::string{char{13}, char{10}} + "2"));
+    CHECK(normalizeDecimal(lfIn + "256" + lfIn) == Text("256"));
+    CHECK(!tabletext::parseDecimal("256" + lfIn + "256"));
+    CHECK(tabletext::parseDecimal(lfIn + "2,5" + lfIn) == std::optional<double>(2.5));
     CHECK(!normalizeDecimal("abc"));
     CHECK(!normalizeDecimal("1,2,3"));
     CHECK(!normalizeDecimal("1.234,5"));

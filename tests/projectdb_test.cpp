@@ -517,22 +517,23 @@ bool publishNow(projectdb::ProjectDb& p)
     return true;
 }
 
-// SQL-frågan som räknar de tio tabellerna i schemat.
-const char* const kTenTablesSql =
+// SQL-frågan som räknar de sjutton tabellerna i schemat.
+const char* const kSeventeenTablesSql =
     "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('project', "
     "'project_conductor', 'doc_value', 'normal_span', 'normal_span_pole', 'doc_normal_span', "
-    "'line_calc', 'line_calc_case', 'doc_line_calc', 'pole_before')";
+    "'line_calc', 'line_calc_case', 'doc_line_calc', 'pole_before', 'pole_after', 'auto_mode', "
+    "'auto_calc', 'pole_import', 'pole_import_column', 'pole_import_row', 'pole_import_cell')";
 
-// Ett nytt projekt har alla tio tabellerna i schemat.
+// Ett nytt projekt har alla sjutton tabellerna i schemat.
 void testSchemaTables()
 {
     auto created = projectdb::ProjectDb::create(join(g_share, "Tabeller.kalkyl"), "Tabeller", options());
     CHECK(created.ok());
     if (!created.ok())
         return;
-    CHECK(countIn(created.value(), kTenTablesSql) == 10);
+    CHECK(countIn(created.value(), kSeventeenTablesSql) == 17);
     CHECK(countIn(created.value(), "PRAGMA user_version") == projectdb::kSchemaVersion);
-    CHECK(projectdb::kSchemaVersion == 4);
+    CHECK(projectdb::kSchemaVersion == 6);
 }
 
 // Skapar en projektfil med bara tabellen project, som i v0.1.0, och angiven user_version.
@@ -573,7 +574,7 @@ void testMigrateFromV010()
         CHECK(p.info().createdUtc == "2026-11-23T12:00:00Z");
         CHECK(p.info().createdWith == "Kalkyl 0.1.0");
         CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
-        CHECK(countIn(p, kTenTablesSql) == 10);
+        CHECK(countIn(p, kSeventeenTablesSql) == 17);
         CHECK(projectdb::setDocValue(p, {"temp_max", "45", "Migrerad"}).ok());
         CHECK(publishNow(p));
         p.close();
@@ -1205,7 +1206,7 @@ void testMigrateFromV020()
         }
         projectdb::ProjectDb& p = opened.value();
         CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
-        CHECK(countIn(p, kTenTablesSql) == 10);
+        CHECK(countIn(p, kSeventeenTablesSql) == 17);
         checkV020Data(p);
 
         auto none = projectdb::lineCalcs(p);
@@ -1331,6 +1332,1036 @@ void testPoleTableRoundTrip()
     }
 }
 
+// ---- Automatiskt läge ----
+
+using projectdb::Stage;
+using projectdb::Wire;
+
+// Bilaga A i planen: tio stolpar ST0100 till ST0109 med spannlängder, H och LKL.
+std::vector<poletable::PoleRow> annexRows()
+{
+    return {poleRow("ST0100", "300", "300", "", "6512000.00", "412000.00", "40.0", "255/262"),
+            poleRow("ST0101", "310", "310", "300", "6511700.00", "411950.00", "42.5", ""),
+            poleRow("ST0102", "300", "300", "320", "6511380.00", "411900.00", "45.0", "262/262"),
+            poleRow("ST0103", "315", "315", "280", "6511100.00", "411860.00", "43.0", ""),
+            poleRow("ST0104", "330", "330", "350", "6510750.00", "411810.00", "47.5", "262/262"),
+            poleRow("ST0105", "300", "300", "310", "6510440.00", "411770.00", "50.0", ""),
+            poleRow("ST0106", "310", "310", "290", "6510150.00", "411730.00", "48.0", "241/241"),
+            poleRow("ST0107", "315", "315", "330", "6509820.00", "411690.00", "46.5", ""),
+            poleRow("ST0108", "285", "285", "300", "6509520.00", "411650.00", "44.0", ""),
+            poleRow("ST0109", "270", "270", "270", "6509250.00", "411610.00", "41.0", "255/262")};
+}
+
+// Läget på med faslinan ST0102–ST0107 och topplinorna ST0101–ST0108.
+projectdb::AutoSettings standardSettings()
+{
+    projectdb::AutoSettings s;
+    s.enabled = true;
+    s.ranges[0] = {"ST0102", "ST0107"};
+    s.ranges[1] = {"ST0101", "ST0108"};
+    return s;
+}
+
+// Lagringstexten för skedet och linan i auto_calc.
+const char* stageName(Stage stage)
+{
+    return stage == Stage::Before ? "before" : "after";
+}
+const char* wireName(Wire wire)
+{
+    return wire == Wire::Phase ? "phase" : wire == Wire::TopLeft ? "top_left" : "top_right";
+}
+
+// Id:na som auto_calc har reserverat för skedet och linan.
+struct Reserved {
+    bool exists = false;
+    std::int64_t spanId = 0;
+    std::int64_t calcId = 0;
+};
+Reserved reservedIds(projectdb::ProjectDb& p, Stage stage, Wire wire)
+{
+    const std::string from = std::string(" FROM auto_calc WHERE stage = '") + stageName(stage) +
+                             "' AND wire = '" + wireName(wire) + "'";
+    Reserved r;
+    r.exists = countIn(p, "SELECT count(*)" + from) == 1;
+    if (r.exists) {
+        r.spanId = countIn(p, "SELECT span_id" + from);
+        r.calcId = countIn(p, "SELECT calc_id" + from);
+    }
+    return r;
+}
+
+// Sant när topplina höger är Samma (ingen rad, tom eller Samma).
+bool topIsSame(projectdb::ProjectDb& p)
+{
+    auto values = projectdb::docValues(p);
+    CHECK(values.ok());
+    if (values.ok())
+        for (const auto& v : values.value())
+            if (v.key == projectdb::kTopRightConductorKey)
+                return v.value.empty() || v.value == projectdb::kSameConductor;
+    return true;
+}
+
+// Anteckningen på en automatisk beräkning enligt planen 7.7.
+std::string expectedNote(Stage stage, Wire wire, bool same, const automode::PoleRange& range)
+{
+    const std::string word = wire == Wire::Phase     ? "faslinan"
+                             : wire == Wire::TopLeft ? (same ? "topplinorna" : "topplina vänster")
+                                                     : "topplina höger";
+    const std::string table = stage == Stage::Before ? "Stolptabell före" : "Stolptabell efter";
+    const std::string note = "Automatisk · " + table + " · " + word;
+    if (range.fromPole.empty() || range.toPole.empty())
+        return note + ", sträckan är inte vald";
+    return note + " " + range.fromPole + "–" + range.toPole;
+}
+
+// Jämför de lagrade automatiska beräkningarna med det som stolptabellerna, sträckorna och
+// Samma ger: stolpar, sträckans läsning och anteckningen för varje aktiv lina, och att inaktiva
+// linor inte har några rader i normal_span och line_calc.
+void checkAutoMatches(projectdb::ProjectDb& p)
+{
+    const bool same = topIsSame(p);
+    for (Stage stage : {Stage::Before, Stage::After}) {
+        auto settings = projectdb::autoSettings(p, stage);
+        auto rows = projectdb::poles(p, stage);
+        CHECK(settings.ok() && rows.ok());
+        if (!settings.ok() || !rows.ok())
+            return;
+        for (Wire wire : {Wire::Phase, Wire::TopLeft, Wire::TopRight}) {
+            const std::size_t index = wire == Wire::Phase ? 0 : wire == Wire::TopLeft ? 1 : 2;
+            const bool active = settings.value().enabled && (wire != Wire::TopRight || !same);
+            const Reserved r = reservedIds(p, stage, wire);
+            if (!active) {
+                if (r.exists) {
+                    CHECK(countIn(p, "SELECT count(*) FROM normal_span WHERE id = " + std::to_string(r.spanId)) == 0);
+                    CHECK(countIn(p, "SELECT count(*) FROM line_calc WHERE id = " + std::to_string(r.calcId)) == 0);
+                }
+                continue;
+            }
+            CHECK(r.exists);
+            if (!r.exists)
+                continue;
+            const automode::PoleRange range = settings.value().ranges[index];
+            const automode::RangeSpan span = automode::rangeSpan(
+                rows.value(), range, projectdb::autoLineWord(wire, same), projectdb::poleTableName(stage));
+            std::vector<ancalc::SpanPole> expected;
+            for (const ancalc::SpanPole& pole : span.poles)
+                if (!pole.pole.empty() || pole.lengthM || pole.heightM)
+                    expected.push_back(pole);
+
+            auto ns = projectdb::normalSpan(p, r.spanId);
+            CHECK(ns.ok() && ns.value().has_value());
+            if (ns.ok() && ns.value()) {
+                const projectdb::NormalSpan& n = *ns.value();
+                CHECK(n.automatic.has_value());
+                CHECK(n.poles.size() == expected.size());
+                for (std::size_t i = 0; i < n.poles.size() && i < expected.size(); ++i) {
+                    CHECK(n.poles[i].pole == expected[i].pole);
+                    CHECK(n.poles[i].lengthM == expected[i].lengthM);
+                    CHECK(n.poles[i].heightM == expected[i].heightM);
+                }
+                if (n.automatic) {
+                    CHECK(n.automatic->stage == stage && n.automatic->wire == wire);
+                    CHECK(n.automatic->range == range);
+                    CHECK(n.automatic->issue == span.rows.issue);
+                    CHECK(n.automatic->firstRow == span.rows.first);
+                    CHECK(n.automatic->lastRow == span.rows.last);
+                }
+                CHECK(n.note == expectedNote(stage, wire, same, range));
+                CHECK(n.docKeys.size() == 1 && n.docKeys[0] == projectdb::normalSpanDocKey(wire, stage));
+            }
+            auto lc = projectdb::lineCalc(p, r.calcId);
+            CHECK(lc.ok() && lc.value().has_value());
+            if (lc.ok() && lc.value()) {
+                CHECK(lc.value()->automatic.has_value());
+                CHECK(lc.value()->note == expectedNote(stage, wire, same, range));
+                CHECK(lc.value()->docSource == projectdb::lineCalcDocKey(wire, stage));
+            }
+        }
+    }
+}
+
+// Sant när den första automatiska normalspannsberäkningen i listan hör till skedet och linan.
+const projectdb::NormalSpan* findAutoSpan(const std::vector<projectdb::NormalSpan>& spans, Stage stage,
+                                          Wire wire)
+{
+    for (const projectdb::NormalSpan& ns : spans)
+        if (ns.automatic && ns.automatic->stage == stage && ns.automatic->wire == wire)
+            return &ns;
+    return nullptr;
+}
+
+// Antal automatiska beräkningar i listan.
+int autoCount(const std::vector<projectdb::NormalSpan>& spans)
+{
+    int n = 0;
+    for (const projectdb::NormalSpan& ns : spans)
+        if (ns.automatic)
+            ++n;
+    return n;
+}
+
+// Sant när två tal är lika inom en tusendel.
+bool closeTo(double a, double b)
+{
+    return std::fabs(a - b) < 1e-3;
+}
+
+// Stolptabell efter har egen lagring: en ny tabell är tom, alla fält kommer tillbaka exakt som
+// för före, och de två tabellerna påverkar inte varandra.
+void testPolesAfterRoundTrip()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Stolptabell efter", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+
+    auto none = projectdb::poles(p, Stage::After);
+    CHECK(none.ok() && none.value().empty());
+
+    std::vector<poletable::PoleRow> rows = tenDecimalRows();
+    rows.insert(rows.begin() + 1, poletable::PoleRow{});   // tom rad mitt i
+    rows.push_back({});                                    // tom rad sist
+    CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+    auto back = projectdb::poles(p, Stage::After);
+    CHECK(back.ok());
+    if (back.ok()) {
+        const std::vector<poletable::PoleRow> expected = {rows[0], rows[1], rows[2], rows[3]};
+        CHECK(back.value() == expected);
+    }
+    CHECK(countIn(p, "SELECT count(*) FROM pole_after") == 4);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_after WHERE position = 0 AND "
+                     "coord_n = '6512240.8500000000' AND typeof(coord_n) = 'text'") == 1);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_after WHERE position = 1 AND pole = '' AND av IS NULL") == 1);
+    auto before = projectdb::polesBefore(p);
+    CHECK(before.ok() && before.value().empty());
+    CHECK(countIn(p, "SELECT count(*) FROM pole_before") == 0);
+
+    // Före ändras utan att efter rörs.
+    CHECK(projectdb::setPolesBefore(p, {poleRow("ny", "1", "", "", "", "", "", "")}).ok());
+    auto still = projectdb::poles(p, Stage::After);
+    CHECK(still.ok() && back.ok() && still.value() == back.value());
+    CHECK(projectdb::poles(p, Stage::Before).ok() && projectdb::poles(p, Stage::Before).value().size() == 1);
+
+    CHECK(publishNow(p));
+    const std::string path = p.path();
+    p.close();
+    auto reopened = projectdb::ProjectDb::open(path, options());
+    CHECK(reopened.ok());
+    if (reopened.ok()) {
+        auto again = projectdb::poles(reopened.value(), Stage::After);
+        CHECK(again.ok() && back.ok() && again.value() == back.value());
+        CHECK(projectdb::setPoles(reopened.value(), Stage::After, {}).ok());
+        CHECK(countIn(reopened.value(), "SELECT count(*) FROM pole_after") == 0);
+        CHECK(countIn(reopened.value(), "SELECT count(*) FROM pole_before") == 1);
+    }
+}
+
+// Inställningen för automatiskt läge: förvalet, trimning av Stolpnr, åäö, och att skedena är
+// oberoende. Utan stolptabell ger ett läge på inga stolpar men en rad per aktiv lina.
+void testAutoSettingsRoundTrip()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Inställning", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+
+    for (Stage stage : {Stage::Before, Stage::After}) {
+        auto def = projectdb::autoSettings(p, stage);
+        CHECK(def.ok() && def.value() == projectdb::AutoSettings{});
+        CHECK(def.ok() && !def.value().enabled && def.value().ranges[0].fromPole.empty());
+    }
+    CHECK(countIn(p, "SELECT count(*) FROM auto_mode") == 0);
+
+    projectdb::AutoSettings s;
+    s.enabled = true;
+    s.ranges[0] = {"  ST0102 ", "ST0107" + std::string(1, char{9})};
+    s.ranges[1] = {"Åkerö-ÄÖ", " ST0108"};
+    s.ranges[2] = {"ST0001", "ST0002"};
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, s).ok());
+    auto back = projectdb::autoSettings(p, Stage::Before);
+    CHECK(back.ok());
+    if (back.ok()) {
+        CHECK(back.value().enabled);
+        CHECK(back.value().ranges[0].fromPole == "ST0102" && back.value().ranges[0].toPole == "ST0107");
+        CHECK(back.value().ranges[1].fromPole == "Åkerö-ÄÖ" && back.value().ranges[1].toPole == "ST0108");
+        CHECK(back.value().ranges[2].fromPole == "ST0001" && back.value().ranges[2].toPole == "ST0002");
+    }
+    auto after = projectdb::autoSettings(p, Stage::After);
+    CHECK(after.ok() && after.value() == projectdb::AutoSettings{});
+
+    projectdb::AutoSettings off;
+    off.ranges[0] = {"A", "B"};
+    CHECK(projectdb::setAutoSettings(p, Stage::After, off).ok());
+    auto afterBack = projectdb::autoSettings(p, Stage::After);
+    CHECK(afterBack.ok() && afterBack.value() == off && !afterBack.value().enabled);
+    auto beforeAgain = projectdb::autoSettings(p, Stage::Before);
+    CHECK(beforeAgain.ok() && back.ok() && beforeAgain.value() == back.value());
+    CHECK(countIn(p, "SELECT count(*) FROM auto_mode") == 2);
+
+    // Läget av ger inga automatiska beräkningar, läget på två rader (Samma) utan stolptabell.
+    CHECK(countIn(p, "SELECT count(*) FROM normal_span") == 2);
+    auto spans = projectdb::normalSpans(p);
+    CHECK(spans.ok() && autoCount(spans.value()) == 2);
+    if (spans.ok()) {
+        CHECK(findAutoSpan(spans.value(), Stage::Before, Wire::Phase) != nullptr);
+        const projectdb::NormalSpan* top = findAutoSpan(spans.value(), Stage::Before, Wire::TopLeft);
+        CHECK(top != nullptr && top->poles.empty());
+        if (top && top->automatic)
+            CHECK(top->automatic->issue == "Stolpnr Åkerö-ÄÖ finns inte i Stolptabell före.");
+    }
+    checkAutoMatches(p);
+}
+
+// Stolptabell efter blir en kopia av före: rader, sträckor och läge ersätts, före är orört, och de
+// automatiska beräkningarna i efter skapas med stabila id.
+void testCopyBeforeToAfter()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Kopiera före", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+
+    CHECK(projectdb::setPoles(p, Stage::Before, annexRows()).ok());
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, standardSettings()).ok());
+    // Efter har andra rader och en egen sträcka med läget på.
+    CHECK(projectdb::setPoles(p, Stage::After, tenDecimalRows()).ok());
+    projectdb::AutoSettings other;
+    other.enabled = true;
+    other.ranges[0] = {"ST0378", "ST0381"};
+    CHECK(projectdb::setAutoSettings(p, Stage::After, other).ok());
+    const Reserved oldPhase = reservedIds(p, Stage::After, Wire::Phase);
+    CHECK(oldPhase.exists);
+    checkAutoMatches(p);
+
+    CHECK(projectdb::copyBeforeToAfter(p).ok());
+    auto after = projectdb::poles(p, Stage::After);
+    CHECK(after.ok() && after.value() == annexRows());
+    auto before = projectdb::polesBefore(p);
+    CHECK(before.ok() && before.value() == annexRows());
+    auto afterSettings = projectdb::autoSettings(p, Stage::After);
+    CHECK(afterSettings.ok() && afterSettings.value() == standardSettings());
+    auto beforeSettings = projectdb::autoSettings(p, Stage::Before);
+    CHECK(beforeSettings.ok() && beforeSettings.value() == standardSettings());
+    CHECK(countIn(p, "SELECT count(*) FROM pole_after") == 10);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_after WHERE pole = 'Åkerö-ÄÖ'") == 0);
+
+    auto spans = projectdb::normalSpans(p);
+    CHECK(spans.ok() && autoCount(spans.value()) == 4);
+    if (spans.ok()) {
+        const projectdb::NormalSpan* phase = findAutoSpan(spans.value(), Stage::After, Wire::Phase);
+        CHECK(phase != nullptr && phase->id == oldPhase.spanId);
+        CHECK(phase != nullptr && phase->poles.size() == 6);
+        if (phase)
+            CHECK(phase->note == "Automatisk · Stolptabell efter · faslinan ST0102–ST0107");
+    }
+    checkAutoMatches(p);
+
+    // Läget av i före följer med: efter blir av och beräkningarna tas bort, id:na är reserverade.
+    projectdb::AutoSettings off = standardSettings();
+    off.enabled = false;
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, off).ok());
+    CHECK(projectdb::copyBeforeToAfter(p).ok());
+    auto offAfter = projectdb::autoSettings(p, Stage::After);
+    CHECK(offAfter.ok() && offAfter.value() == off);
+    auto none = projectdb::normalSpans(p);
+    CHECK(none.ok() && none.value().empty());
+    CHECK(countIn(p, "SELECT count(*) FROM auto_calc WHERE stage = 'after'") == 2);
+    checkAutoMatches(p);
+
+    // Utan någon rad i auto_mode för före blir efter också utan rad.
+    CHECK(p.local().exec("DELETE FROM auto_mode WHERE stage = 'before'").ok());
+    CHECK(projectdb::copyBeforeToAfter(p).ok());
+    CHECK(countIn(p, "SELECT count(*) FROM auto_mode WHERE stage = 'after'") == 0);
+}
+
+// Synkningen efter varje sorts ändring: stolpar, anteckning och sträckans läsning följer
+// tabellen, id:na står kvar, och bara det som ändrats får ny modified_utc.
+void testAutoCalcsSync()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Automatisk synk", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+    const std::string dummy = "2000-01-01T00:00:00Z";
+    const auto freeze = [&]() {
+        CHECK(p.local().exec("UPDATE normal_span SET modified_utc = '" + dummy + "'").ok());
+        CHECK(p.local().exec("UPDATE line_calc SET modified_utc = '" + dummy + "'").ok());
+    };
+
+    CHECK(projectdb::setPoles(p, Stage::Before, annexRows()).ok());
+    auto idle = projectdb::normalSpans(p);
+    CHECK(idle.ok() && idle.value().empty());
+    CHECK(countIn(p, "SELECT count(*) FROM auto_calc") == 0);
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, standardSettings()).ok());
+
+    // Två automatiska beräkningar först i listan, med stolpar, anteckning och rader.
+    auto spans = projectdb::normalSpans(p);
+    CHECK(spans.ok() && spans.value().size() == 2 && autoCount(spans.value()) == 2);
+    if (!spans.ok() || spans.value().size() != 2)
+        return;
+    const projectdb::NormalSpan& phase = spans.value()[0];
+    const projectdb::NormalSpan& top = spans.value()[1];
+    CHECK(phase.id > 0 && top.id > 0 && phase.id != top.id);
+    CHECK(phase.automatic && phase.automatic->wire == Wire::Phase && phase.automatic->stage == Stage::Before);
+    CHECK(top.automatic && top.automatic->wire == Wire::TopLeft);
+    CHECK(phase.note == "Automatisk · Stolptabell före · faslinan ST0102–ST0107");
+    CHECK(top.note == "Automatisk · Stolptabell före · topplinorna ST0101–ST0108");
+    CHECK(phase.docKeys.size() == 1 && phase.docKeys[0] == "ns_calc_phase_before");
+    CHECK(top.docKeys.size() == 1 && top.docKeys[0] == "ns_calc_top_left_before");
+    CHECK(phase.poles.size() == 6 && top.poles.size() == 8);
+    CHECK(phase.automatic && phase.automatic->firstRow == 2 && phase.automatic->lastRow == 7);
+    CHECK(phase.automatic && phase.automatic->issue.empty());
+    CHECK(phase.limits.longest == 1.5 && phase.limits.shortest == 0.5 && phase.limits.adjacent == 2.5);
+    const auto phaseCalc = projectdb::calculateSpan(phase);
+    const auto topCalc = projectdb::calculateSpan(top);
+    CHECK(phaseCalc.result && closeTo(phaseCalc.result->an, 315.2) && closeTo(phaseCalc.result->anExact, 315.1557));
+    CHECK(topCalc.result && closeTo(topCalc.result->an, 313.8));
+    checkAutoMatches(p);
+
+    // Linberäkningarna: automatiska först, kopplade till sin rad, med förvalen som indata.
+    auto calcs = projectdb::lineCalcs(p);
+    CHECK(calcs.ok() && calcs.value().size() == 2);
+    if (calcs.ok() && calcs.value().size() == 2) {
+        const projectdb::LineCalc& lc = calcs.value()[0];
+        CHECK(lc.automatic && lc.automatic->wire == Wire::Phase);
+        CHECK(lc.docSource == "line_calc_phase_before");
+        CHECK(lc.docKeys.size() == 1 && lc.docKeys[0] == "line_calc_phase_before");
+        CHECK(lc.note == phase.note);
+        checkSameInput(lc.input, linecalc::newLineInput());
+        auto docs = projectdb::docLineSources(p);
+        CHECK(docs.ok());
+        if (docs.ok()) {
+            bool found = false;
+            for (const auto& [key, an] : docs.value().normalSpans)
+                if (key == "ns_calc_phase_before") {
+                    found = an.has_value() && closeTo(*an, 315.2);
+                }
+            CHECK(found);
+            CHECK(std::find(docs.value().autoSpanKeys.begin(), docs.value().autoSpanKeys.end(),
+                            "ns_calc_phase_before") != docs.value().autoSpanKeys.end());
+            const projectdb::ResolvedLineInput r = projectdb::resolveLineInput(lc.input, lc.docSource, docs.value());
+            CHECK(r.input.normalSpanM && closeTo(*r.input.normalSpanM, 315.2));
+            CHECK(hasSource(r, projectdb::LineSourceField::NormalSpan, "ns_calc_phase_before"));
+        }
+    }
+
+    // ST0104 = 365 och ST0105 = 295 ger aₙ 316,8 och 315,0 och ny modified_utc. Id:na står kvar.
+    freeze();
+    std::vector<poletable::PoleRow> rows = annexRows();
+    rows[4].spanM = "365";
+    rows[5].spanM = "295";
+    CHECK(projectdb::setPoles(p, Stage::Before, rows).ok());
+    auto changed = projectdb::normalSpans(p);
+    CHECK(changed.ok() && changed.value().size() == 2);
+    if (changed.ok() && changed.value().size() == 2) {
+        CHECK(changed.value()[0].id == phase.id && changed.value()[1].id == top.id);
+        const auto c0 = projectdb::calculateSpan(changed.value()[0]);
+        const auto c1 = projectdb::calculateSpan(changed.value()[1]);
+        CHECK(c0.result && closeTo(c0.result->an, 316.8));
+        CHECK(c1.result && closeTo(c1.result->an, 315.0));
+        CHECK(changed.value()[0].modifiedUtc != dummy && changed.value()[1].modifiedUtc != dummy);
+        CHECK(changed.value()[0].createdUtc == phase.createdUtc);
+    }
+    checkAutoMatches(p);
+
+    // Bara Av, Ah, N, E och LKL ändras: stolparna är desamma och modified_utc rörs inte.
+    freeze();
+    rows[3].av = "999";
+    rows[3].lkl = "ändrad åäö";
+    rows[2].north = "1.5";
+    CHECK(projectdb::setPoles(p, Stage::Before, rows).ok());
+    auto quiet = projectdb::normalSpans(p);
+    CHECK(quiet.ok() && quiet.value().size() == 2);
+    if (quiet.ok() && quiet.value().size() == 2)
+        CHECK(quiet.value()[0].modifiedUtc == dummy && quiet.value()[1].modifiedUtc == dummy);
+    auto quietCalcs = projectdb::lineCalcs(p);
+    CHECK(quietCalcs.ok() && quietCalcs.value().size() == 2 && quietCalcs.value()[0].modifiedUtc == dummy);
+    checkAutoMatches(p);
+
+    // En rad före sträckan ändras: inga ändrade stolpar, men sträckans rader flyttas om en rad
+    // sätts in före. Raden flyttar sträckan ett steg, och bara firstRow och lastRow skiljer.
+    freeze();
+    std::vector<poletable::PoleRow> shifted = rows;
+    shifted.insert(shifted.begin(), poleRow("ST0099", "", "", "", "", "", "", ""));
+    CHECK(projectdb::setPoles(p, Stage::Before, shifted).ok());
+    auto moved = projectdb::normalSpans(p);
+    CHECK(moved.ok() && moved.value().size() == 2);
+    if (moved.ok() && moved.value().size() == 2) {
+        CHECK(moved.value()[0].automatic && moved.value()[0].automatic->firstRow == 3 &&
+              moved.value()[0].automatic->lastRow == 8);
+        CHECK(moved.value()[0].modifiedUtc == dummy);
+    }
+    checkAutoMatches(p);
+    CHECK(projectdb::setPoles(p, Stage::Before, rows).ok());
+
+    // En ny sträcka ger nya stolpar och en ny anteckning.
+    freeze();
+    projectdb::AutoSettings s = standardSettings();
+    s.ranges[0] = {"ST0103", "ST0106"};
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, s).ok());
+    auto ranged = projectdb::normalSpans(p);
+    CHECK(ranged.ok() && ranged.value().size() == 2);
+    if (ranged.ok() && ranged.value().size() == 2) {
+        CHECK(ranged.value()[0].id == phase.id);
+        CHECK(ranged.value()[0].poles.size() == 4);
+        CHECK(ranged.value()[0].note == "Automatisk · Stolptabell före · faslinan ST0103–ST0106");
+        CHECK(ranged.value()[0].modifiedUtc != dummy);
+        CHECK(ranged.value()[1].modifiedUtc == dummy);
+    }
+    auto rangedCalc = projectdb::lineCalcs(p);
+    CHECK(rangedCalc.ok() && rangedCalc.value().size() == 2 &&
+          rangedCalc.value()[0].note == "Automatisk · Stolptabell före · faslinan ST0103–ST0106" &&
+          rangedCalc.value()[0].modifiedUtc != dummy && rangedCalc.value()[1].modifiedUtc == dummy);
+    checkAutoMatches(p);
+
+    // Ett fel i sträckan ger issue, inga stolpar och felet ur calculateSpan. Rättad kommer stolparna tillbaka.
+    s.ranges[0] = {"ST0102", "ST0199"};
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, s).ok());
+    auto broken = projectdb::normalSpans(p);
+    CHECK(broken.ok() && broken.value().size() == 2);
+    if (broken.ok() && broken.value().size() == 2) {
+        const projectdb::NormalSpan& b = broken.value()[0];
+        CHECK(b.id == phase.id && b.poles.empty());
+        CHECK(b.automatic && b.automatic->issue == "Stolpnr ST0199 finns inte i Stolptabell före.");
+        CHECK(b.automatic && b.automatic->firstRow == -1 && b.automatic->lastRow == -1);
+        const auto calc = projectdb::calculateSpan(b);
+        CHECK(!calc.result && calc.issues.size() == 1 && calc.issues[0].message == b.automatic->issue);
+        CHECK(calc.issues.size() == 1 && calc.issues[0].poleIndex == -1);
+    }
+    checkAutoMatches(p);
+    s.ranges[0] = {"ST0102", "ST0107"};
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, s).ok());
+    auto fixed = projectdb::normalSpans(p);
+    CHECK(fixed.ok() && fixed.value().size() == 2 && fixed.value()[0].poles.size() == 6);
+    checkAutoMatches(p);
+
+    // En egen lina på Topplina höger ger en tredje automatisk beräkning med felet "Välj ...".
+    CHECK(projectdb::setDocConductor(p, projectdb::kTopRightConductorKey, curlew()).ok());
+    auto three = projectdb::normalSpans(p);
+    CHECK(three.ok() && autoCount(three.value()) == 3);
+    if (three.ok()) {
+        const projectdb::NormalSpan* right = findAutoSpan(three.value(), Stage::Before, Wire::TopRight);
+        CHECK(right != nullptr && right->poles.empty());
+        if (right && right->automatic) {
+            CHECK(right->automatic->issue == "Välj var topplina höger börjar och slutar.");
+            CHECK(right->docKeys.size() == 1 && right->docKeys[0] == "ns_calc_top_right_before");
+            CHECK(right->note == "Automatisk · Stolptabell före · topplina höger, sträckan är inte vald");
+        }
+        const projectdb::NormalSpan* left = findAutoSpan(three.value(), Stage::Before, Wire::TopLeft);
+        CHECK(left != nullptr && left->note == "Automatisk · Stolptabell före · topplina vänster ST0101–ST0108");
+    }
+    CHECK(countIn(p, "SELECT count(*) FROM auto_calc") == 3);
+    checkAutoMatches(p);
+
+    // Samma tar bort den tredje, men raden i auto_calc står kvar med sina id:n.
+    CHECK(projectdb::setDocValue(p, {std::string(projectdb::kTopRightConductorKey),
+                                     std::string(projectdb::kSameConductor), ""})
+              .ok());
+    auto back = projectdb::normalSpans(p);
+    CHECK(back.ok() && autoCount(back.value()) == 2);
+    if (back.ok())
+        CHECK(findAutoSpan(back.value(), Stage::Before, Wire::TopLeft) != nullptr &&
+              findAutoSpan(back.value(), Stage::Before, Wire::TopLeft)->note ==
+                  "Automatisk · Stolptabell före · topplinorna ST0101–ST0108");
+    CHECK(countIn(p, "SELECT count(*) FROM auto_calc") == 3);
+    checkAutoMatches(p);
+    const Reserved right = reservedIds(p, Stage::Before, Wire::TopRight);
+    CHECK(right.exists);
+
+    // Läget av: raderna i normal_span och line_calc är borta, raderna i auto_calc finns kvar.
+    const Reserved phaseIds = reservedIds(p, Stage::Before, Wire::Phase);
+    const Reserved topIds = reservedIds(p, Stage::Before, Wire::TopLeft);
+    CHECK(phaseIds.spanId == phase.id && topIds.spanId == top.id);
+    s.enabled = false;
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, s).ok());
+    auto gone = projectdb::normalSpans(p);
+    CHECK(gone.ok() && gone.value().empty());
+    auto goneCalcs = projectdb::lineCalcs(p);
+    CHECK(goneCalcs.ok() && goneCalcs.value().empty());
+    CHECK(countIn(p, "SELECT count(*) FROM normal_span") == 0);
+    CHECK(countIn(p, "SELECT count(*) FROM normal_span_pole") == 0);
+    CHECK(countIn(p, "SELECT count(*) FROM line_calc") == 0);
+    CHECK(countIn(p, "SELECT count(*) FROM line_calc_case") == 0);
+    CHECK(countIn(p, "SELECT count(*) FROM auto_calc") == 3);
+    checkAutoMatches(p);
+
+    // En ny vanlig beräkning medan läget är av får ett id över alla reserverade.
+    projectdb::NormalSpan ordinary;
+    ordinary.poles = exampleC();
+    auto ordinarySpan = projectdb::saveNormalSpan(p, ordinary);
+    CHECK(ordinarySpan.ok());
+    if (ordinarySpan.ok())
+        CHECK(ordinarySpan.value() > std::max({phaseIds.spanId, topIds.spanId, right.spanId}));
+    auto ordinaryCalc = projectdb::saveLineCalc(p, manualCalc(t1Input(linecalc::CalcMode::New)));
+    CHECK(ordinaryCalc.ok());
+    if (ordinaryCalc.ok())
+        CHECK(ordinaryCalc.value() > std::max({phaseIds.calcId, topIds.calcId, right.calcId}));
+
+    // Läget på igen: samma id och värden ur tabellen som den är nu, de vanliga efter de automatiska.
+    rows[6].spanM = "300";
+    CHECK(projectdb::setPoles(p, Stage::Before, rows).ok());
+    s.enabled = true;
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, s).ok());
+    auto again = projectdb::normalSpans(p);
+    CHECK(again.ok() && again.value().size() == 3 && autoCount(again.value()) == 2);
+    if (again.ok() && again.value().size() == 3) {
+        CHECK(again.value()[0].id == phase.id && again.value()[1].id == top.id);
+        CHECK(!again.value()[2].automatic && ordinarySpan.ok() && again.value()[2].id == ordinarySpan.value());
+        CHECK(again.value()[0].poles.size() == 6 && again.value()[0].poles[4].lengthM == 300.0);
+        const auto c0 = projectdb::calculateSpan(again.value()[0]);
+        CHECK(c0.result && !closeTo(c0.result->an, 316.8));
+    }
+    auto againCalcs = projectdb::lineCalcs(p);
+    CHECK(againCalcs.ok() && againCalcs.value().size() == 3);
+    if (againCalcs.ok() && againCalcs.value().size() == 3) {
+        CHECK(againCalcs.value()[0].id == phaseIds.calcId && againCalcs.value()[1].id == topIds.calcId);
+        CHECK(!againCalcs.value()[2].automatic);
+    }
+    checkAutoMatches(p);
+}
+
+// En lagrad normalspannsberäkning och en kopplad linberäkning på de tagna raderna vilar medan
+// läget är på, och är tillbaka oförändrade när läget är av.
+void testAutoDormantLinks()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Vilande kopplingar", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+    CHECK(projectdb::setPoles(p, Stage::Before, annexRows()).ok());
+    projectdb::NormalSpan stored;
+    stored.note = "Lagrad åäö";
+    stored.poles = exampleC();
+    auto spanId = projectdb::saveNormalSpan(p, stored, "ns_calc_phase_before");
+    auto calcId = projectdb::saveLineCalc(p, linkedCalc("line_calc_phase_before"));
+    CHECK(spanId.ok() && calcId.ok());
+    if (!spanId.ok() || !calcId.ok())
+        return;
+    CHECK(projectdb::setDocValue(p, {"ns_calc_top_left_before", "330", "Manuell åäö"}).ok());
+    CHECK(projectdb::setDocValue(p, {"tension_phase", "90", ""}).ok());
+
+    // Utan läget visar raderna de lagrade beräkningarna, och aₙ är exempel C:s.
+    auto span = projectdb::normalSpan(p, spanId.value());
+    CHECK(span.ok() && span.value() && span.value()->docKeys == std::vector<std::string>{"ns_calc_phase_before"});
+    CHECK(readCalc(p, calcId.value()).docKeys == std::vector<std::string>{"line_calc_phase_before"});
+    const auto exampleCSpan = ancalc::calculateNormalSpan(exampleC(), {});
+    auto plainDocs = projectdb::docLineSources(p);
+    CHECK(plainDocs.ok() && plainDocs.value().autoSpanKeys.empty());
+    if (plainDocs.ok() && exampleCSpan.result) {
+        bool found = false;
+        for (const auto& [key, an] : plainDocs.value().normalSpans)
+            if (key == "ns_calc_phase_before")
+                found = an && closeTo(*an, exampleCSpan.result->an);
+        CHECK(found);
+    }
+
+    // Med läget på har de lagrade beräkningarna inga rader, men kopplingarna finns kvar i tabellerna.
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, standardSettings()).ok());
+    span = projectdb::normalSpan(p, spanId.value());
+    CHECK(span.ok() && span.value() && span.value()->docKeys.empty() && !span.value()->automatic);
+    CHECK(readCalc(p, calcId.value()).docKeys.empty());
+    CHECK(countIn(p, "SELECT count(*) FROM doc_normal_span WHERE doc_key = 'ns_calc_phase_before'") == 1);
+    CHECK(countIn(p, "SELECT count(*) FROM doc_line_calc WHERE doc_key = 'line_calc_phase_before'") == 1);
+    auto autoDocs = projectdb::docLineSources(p);
+    CHECK(autoDocs.ok());
+    if (autoDocs.ok()) {
+        int count = 0;
+        for (const auto& [key, an] : autoDocs.value().normalSpans)
+            if (key == "ns_calc_phase_before") {
+                ++count;
+                CHECK(an && closeTo(*an, 315.2));
+            }
+        CHECK(count == 1);
+        CHECK(autoDocs.value().autoSpanKeys.size() == 2);
+    }
+
+    // Tillåtet: spara den lagrade kopplade beräkningen och sätta ett värde på en tagen rad.
+    projectdb::LineCalc lc = readCalc(p, calcId.value());
+    lc.note = "Ändrad åäö";
+    CHECK(projectdb::saveLineCalc(p, lc).ok());
+    CHECK(readCalc(p, calcId.value()).note == "Ändrad åäö");
+    CHECK(projectdb::setDocValue(p, {"ns_calc_top_left_before", "335", "Manuell åäö"}).ok());
+    checkAutoMatches(p);
+
+    // Med läget av är kopplingarna och värdet tillbaka, oförändrade.
+    projectdb::AutoSettings off = standardSettings();
+    off.enabled = false;
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, off).ok());
+    span = projectdb::normalSpan(p, spanId.value());
+    CHECK(span.ok() && span.value() && span.value()->docKeys == std::vector<std::string>{"ns_calc_phase_before"});
+    CHECK(readCalc(p, calcId.value()).docKeys == std::vector<std::string>{"line_calc_phase_before"});
+    auto values = projectdb::docValues(p);
+    CHECK(values.ok());
+    if (values.ok()) {
+        bool found = false;
+        for (const auto& v : values.value())
+            if (v.key == "ns_calc_top_left_before")
+                found = v.value == "335" && v.reference == "Manuell åäö";
+        CHECK(found);
+    }
+    checkAutoMatches(p);
+}
+
+// Varje spärr i planen 7.5 ger Invalid med sin text, och revisionen och raderna är oförändrade.
+void testAutoGuards()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Spärrar", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+    CHECK(projectdb::setPoles(p, Stage::Before, annexRows()).ok());
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, standardSettings()).ok());
+    CHECK(projectdb::copyBeforeToAfter(p).ok());
+    projectdb::NormalSpan ordinary;
+    ordinary.poles = exampleC();
+    auto ordinarySpan = projectdb::saveNormalSpan(p, ordinary);
+    auto ordinaryCalc = projectdb::saveLineCalc(p, manualCalc(t1Input(linecalc::CalcMode::New)));
+    CHECK(ordinarySpan.ok() && ordinaryCalc.ok());
+    if (!ordinarySpan.ok() || !ordinaryCalc.ok())
+        return;
+    const Reserved phase = reservedIds(p, Stage::Before, Wire::Phase);
+    const Reserved afterPhase = reservedIds(p, Stage::After, Wire::Phase);
+    CHECK(phase.exists && afterPhase.exists);
+
+    const std::string t1 = "Den automatiska beräkningen räknas ur Stolptabell före och kan inte ändras.";
+    const std::string t1After = "Den automatiska beräkningen räknas ur Stolptabell efter och kan inte ändras.";
+    const std::string t2 =
+        "Den automatiska beräkningen kan inte tas bort. Stäng av automatiskt läge i Stolptabell före.";
+    const std::string t2After =
+        "Den automatiska beräkningen kan inte tas bort. Stäng av automatiskt läge i Stolptabell efter.";
+    const std::string t3 = "Raden visar en automatisk beräkning ur Stolptabell före. Stäng av automatiskt "
+                           "läge där för att koppla en annan beräkning.";
+    const std::string t3After = "Raden visar en automatisk beräkning ur Stolptabell efter. Stäng av "
+                                "automatiskt läge där för att koppla en annan beräkning.";
+
+    const auto revision = p.revision();
+    const auto spanCount = countIn(p, "SELECT count(*) FROM normal_span");
+    const auto calcCount = countIn(p, "SELECT count(*) FROM line_calc");
+    const auto checkInvalid = [&](const core::Result<void>& r, const std::string& text) {
+        CHECK(!r.ok() && r.error().code == ErrorCode::Invalid);
+        if (!r.ok())
+            CHECK(r.error().message == text);
+        CHECK(p.revision() == revision);
+        CHECK(countIn(p, "SELECT count(*) FROM normal_span") == spanCount);
+        CHECK(countIn(p, "SELECT count(*) FROM line_calc") == calcCount);
+    };
+    const auto checkInvalidId = [&](const core::Result<std::int64_t>& r, const std::string& text) {
+        CHECK(!r.ok() && r.error().code == ErrorCode::Invalid);
+        if (!r.ok())
+            CHECK(r.error().message == text);
+        CHECK(p.revision() == revision);
+    };
+
+    // T1: ändra en automatisk beräkning.
+    projectdb::NormalSpan edit = *projectdb::normalSpan(p, phase.spanId).value();
+    edit.note = "Ändrad";
+    checkInvalidId(projectdb::saveNormalSpan(p, edit), t1);
+    checkInvalid(projectdb::linkNormalSpan(p, phase.spanId, "ns_calc_top_right_before"), t1);
+    projectdb::LineCalc editCalc = readCalc(p, phase.calcId);
+    editCalc.note = "Ändrad";
+    checkInvalidId(projectdb::saveLineCalc(p, editCalc), t1);
+    checkInvalid(projectdb::linkLineCalc(p, phase.calcId, "line_calc_phase_before"), t1);
+    checkInvalid(projectdb::detachLineCalc(p, phase.calcId), t1);
+    edit.id = afterPhase.spanId;
+    checkInvalidId(projectdb::saveNormalSpan(p, edit), t1After);
+
+    // T2: ta bort en automatisk beräkning.
+    checkInvalid(projectdb::removeNormalSpan(p, phase.spanId), t2);
+    checkInvalid(projectdb::removeLineCalc(p, phase.calcId), t2);
+    checkInvalid(projectdb::removeNormalSpan(p, afterPhase.spanId), t2After);
+    checkInvalid(projectdb::removeLineCalc(p, afterPhase.calcId), t2After);
+
+    // T3: koppla om en tagen rad.
+    projectdb::NormalSpan fresh;
+    fresh.poles = exampleC();
+    checkInvalidId(projectdb::saveNormalSpan(p, fresh, "ns_calc_phase_before"), t3);
+    checkInvalidId(projectdb::saveNormalSpan(p, fresh, "ns_calc_phase_after"), t3After);
+    checkInvalid(projectdb::linkNormalSpan(p, ordinarySpan.value(), "ns_calc_phase_before"), t3);
+    checkInvalid(projectdb::unlinkDocRow(p, "ns_calc_phase_before"), t3);
+    checkInvalid(projectdb::unlinkDocRow(p, "line_calc_top_left_before"), t3);
+    checkInvalidId(projectdb::saveLineCalc(p, linkedCalc("line_calc_phase_before")), t3);
+    checkInvalidId(projectdb::saveLineCalc(p, manualCalc(t1Input(linecalc::CalcMode::New)),
+                                           "line_calc_phase_before"),
+                   t3);
+    checkInvalid(projectdb::linkLineCalc(p, ordinaryCalc.value(), "line_calc_phase_after"), t3After);
+
+    // Raden för topplina höger är inte tagen med Samma, och en vanlig beräkning går att koppla dit.
+    CHECK(projectdb::linkNormalSpan(p, ordinarySpan.value(), "ns_calc_top_right_before").ok());
+    CHECK(projectdb::unlinkDocRow(p, "ns_calc_top_right_before").ok());
+
+    // Spärrarna gäller de reserverade id:na också när läget är av.
+    projectdb::AutoSettings off = standardSettings();
+    off.enabled = false;
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, off).ok());
+    CHECK(countIn(p, "SELECT count(*) FROM normal_span WHERE id = " + std::to_string(phase.spanId)) == 0);
+    const auto revisionOff = p.revision();
+    auto removed = projectdb::removeNormalSpan(p, phase.spanId);
+    CHECK(!removed.ok() && removed.error().code == ErrorCode::Invalid && removed.error().message == t2);
+    auto removedCalc = projectdb::removeLineCalc(p, phase.calcId);
+    CHECK(!removedCalc.ok() && removedCalc.error().code == ErrorCode::Invalid);
+    CHECK(p.revision() == revisionOff);
+    // Och raden är fri att koppla när läget är av.
+    CHECK(projectdb::linkNormalSpan(p, ordinarySpan.value(), "ns_calc_phase_before").ok());
+}
+
+// En sträcka till en stolpe som saknas ger issue och inget aₙ, och upplösningen säger var det rättas.
+void testAutoIssue()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Sträckfel", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+    CHECK(projectdb::setPoles(p, Stage::Before, annexRows()).ok());
+    projectdb::AutoSettings s = standardSettings();
+    s.ranges[0] = {"ST0102", "ST0199"};
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, s).ok());
+
+    auto spans = projectdb::normalSpans(p);
+    CHECK(spans.ok() && !spans.value().empty());
+    if (!spans.ok() || spans.value().empty())
+        return;
+    const projectdb::NormalSpan& phase = spans.value()[0];
+    CHECK(phase.automatic && phase.automatic->issue == "Stolpnr ST0199 finns inte i Stolptabell före.");
+    CHECK(phase.poles.empty());
+
+    auto docs = projectdb::docLineSources(p);
+    CHECK(docs.ok());
+    if (!docs.ok())
+        return;
+    bool found = false;
+    for (const auto& [key, an] : docs.value().normalSpans)
+        if (key == "ns_calc_phase_before") {
+            found = true;
+            CHECK(!an.has_value());
+        }
+    CHECK(found);
+    auto calcs = projectdb::lineCalcs(p);
+    CHECK(calcs.ok() && !calcs.value().empty());
+    if (!calcs.ok() || calcs.value().empty())
+        return;
+    const projectdb::LineCalc& lc = calcs.value()[0];
+    const projectdb::ResolvedLineInput r = projectdb::resolveLineInput(lc.input, lc.docSource, docs.value());
+    const linecalc::LineIssue* issue = issueFor(r.issues, linecalc::LineField::NormalSpan);
+    CHECK(issue != nullptr);
+    if (issue)
+        CHECK(issue->message == "Faslina normalspannsberäkning före ombyggnad har fel och ger inget aₙ. "
+                                "Rätta sträckan eller stolparna i Stolptabell före.");
+    CHECK(!r.input.normalSpanM.has_value());
+}
+
+// Skapar projektfilen som v0.4.0 hade den: steg 1 till 4, user_version 4 och uppgifter i alla
+// tabeller. Namnet är åäö-v040. Stolptabell före har tre rader med tio decimaler.
+bool writeV040Project(const std::string& path)
+{
+    db::OpenOptions o;
+    o.mode = db::OpenMode::CreateNew;
+    auto d = db::Database::open(path, o);
+    CHECK(d.ok());
+    if (!d.ok())
+        return false;
+    const std::string head =
+        "PRAGMA application_id = " + std::to_string(projectdb::kApplicationId) +
+        "; PRAGMA user_version = 4; "
+        "CREATE TABLE project (id INTEGER PRIMARY KEY CHECK (id = 1), name TEXT NOT NULL, "
+        "created_utc TEXT NOT NULL, created_with TEXT NOT NULL); ";
+    bool ok = d.value().exec(head).ok();
+    ok = ok && d.value().exec(std::string(projectdb::dev::kStep2)).ok();
+    ok = ok && d.value().exec(std::string(projectdb::dev::kStep3)).ok();
+    ok = ok && d.value().exec(std::string(projectdb::dev::kStep4)).ok();
+    const std::string data = R"sql(
+INSERT INTO project VALUES (1, 'åäö-v040', '2026-11-26T12:00:00Z', 'Kalkyl 0.4.0');
+INSERT INTO doc_value(key, value, reference) VALUES
+    ('tension_phase', '90', 'Ref åäö'),
+    ('temp_max', '50', '');
+INSERT INTO normal_span(id, note, limit_longest, limit_shortest, limit_adjacent, limit_local_min,
+                        limit_local_max, created_utc, modified_utc)
+VALUES (1, 'Exempel C åäö', 1.6, 0.4, 2.2, 0.9, 1.2, '2026-11-26T12:00:00Z', '2026-11-26T12:00:00Z');
+INSERT INTO normal_span_pole(span_id, position, pole, length_m, height_m) VALUES
+    (1, 0, 'P0', 250, 10), (1, 1, 'P1', 300, 20), (1, 2, 'P2', 200, 15), (1, 3, 'P3', 400, 30);
+INSERT INTO doc_normal_span(doc_key, span_id) VALUES ('ns_calc_phase_before', 1);
+INSERT INTO line_calc(id, note, doc_source, created_utc, modified_utc)
+VALUES (1, 'Linberäkning åäö', 'line_calc_phase_after', '2026-11-26T12:00:00Z', '2026-11-26T12:00:00Z');
+WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 15)
+INSERT INTO line_calc_case(calc_id, case_id) SELECT 1, i FROM n;
+INSERT INTO doc_line_calc(doc_key, calc_id) VALUES ('line_calc_phase_after', 1);
+INSERT INTO pole_before(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl) VALUES
+    (0, 'ST0378', '363', '362', '348', '6512240.8500000000', '412181.98', '44.19', '255/262'),
+    (1, 'Åkerö-ÄÖ', NULL, '-12.5', '0', NULL, NULL, NULL, ''),
+    (2, 'ST0381', '44.10', NULL, NULL, '6511247.0800000000', '411804.35', '30.01', '262/262');
+)sql";
+    ok = ok && d.value().exec(data).ok();
+    CHECK(ok);
+    return ok;
+}
+
+// Kontrollerar att allt som v0.4.0-filen innehöll finns kvar. Med läget på visar de tagna raderna
+// automatiska beräkningar, så den lagrade linberäkningen och normalspannet har inga rader då.
+void checkV040Data(projectdb::ProjectDb& p, bool autoOn)
+{
+    CHECK(p.info().name == "åäö-v040");
+    CHECK(p.info().createdWith == "Kalkyl 0.4.0");
+    auto values = projectdb::docValues(p);
+    CHECK(values.ok() && values.value().size() == 2);
+    if (values.ok()) {
+        for (const auto& v : values.value()) {
+            if (v.key == "tension_phase")
+                CHECK(v.value == "90" && v.reference == "Ref åäö");
+            else if (v.key == "temp_max")
+                CHECK(v.value == "50");
+            else
+                CHECK(false);
+        }
+    }
+    auto span = projectdb::normalSpan(p, 1);
+    CHECK(span.ok() && span.value().has_value());
+    if (span.ok() && span.value()) {
+        CHECK(span.value()->note == "Exempel C åäö" && span.value()->poles.size() == 4);
+        CHECK(span.value()->limits.longest == 1.6 && span.value()->limits.localMax == 1.2);
+        CHECK(span.value()->docKeys.size() == 1 && span.value()->docKeys[0] == "ns_calc_phase_before");
+        CHECK(!span.value()->automatic);
+    }
+    const projectdb::LineCalc lc = readCalc(p, 1);
+    CHECK(lc.note == "Linberäkning åäö" && lc.docSource == "line_calc_phase_after" && !lc.automatic);
+    if (autoOn)
+        CHECK(lc.docKeys.empty());
+    else
+        CHECK(lc.docKeys.size() == 1 && lc.docKeys[0] == "line_calc_phase_after");
+    CHECK(countIn(p, "SELECT count(*) FROM line_calc_case WHERE calc_id = 1") == 15);
+    CHECK(countIn(p, "SELECT count(*) FROM doc_line_calc") == 1);
+    CHECK(countIn(p, "SELECT count(*) FROM doc_normal_span") == 1);
+    auto before = projectdb::polesBefore(p);
+    CHECK(before.ok() && before.value() == tenDecimalRows());
+    if (before.ok() && before.value().size() == 3)
+        CHECK(before.value()[0].north == "6512240.8500000000" && before.value()[2].av == "44.10");
+}
+
+// Ett projekt som v0.4.0 hade det migreras till steg 5: allt gammalt finns kvar, Stolptabell efter
+// är tom, läget är av utan automatiska beräkningar, och med läget på finns de automatiska
+// beräkningarna kvar med samma id efter publicering och ny öppning.
+void testMigrateFromV040()
+{
+    const std::string path = join(g_share, "Från 0.4.0.kalkyl");
+    if (!writeV040Project(path))
+        return;
+    Reserved phaseIds;
+    {
+        auto opened = projectdb::ProjectDb::open(path, options());
+        CHECK(opened.ok());
+        if (!opened.ok()) {
+            std::cerr << opened.error().message << " / " << opened.error().detail << std::endl;
+            return;
+        }
+        projectdb::ProjectDb& p = opened.value();
+        CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
+        CHECK(countIn(p, kSeventeenTablesSql) == 17);
+        CHECK(countIn(p, "SELECT count(*) FROM pole_import") == 0);
+        {
+            auto none = projectdb::lastPoleImport(p);
+            CHECK(none.ok() && !none.value().has_value());
+        }
+        checkV040Data(p, false);
+        auto after = projectdb::poles(p, Stage::After);
+        CHECK(after.ok() && after.value().empty());
+        for (Stage stage : {Stage::Before, Stage::After}) {
+            auto settings = projectdb::autoSettings(p, stage);
+            CHECK(settings.ok() && settings.value() == projectdb::AutoSettings{});
+        }
+        CHECK(countIn(p, "SELECT count(*) FROM auto_calc") == 0);
+        CHECK(countIn(p, "SELECT count(*) FROM auto_mode") == 0);
+        auto spans = projectdb::normalSpans(p);
+        CHECK(spans.ok() && spans.value().size() == 1 && autoCount(spans.value()) == 0);
+
+        // Läget på i efter med bilaga A: de gamla raderna på efterraden vilar.
+        CHECK(projectdb::setPoles(p, Stage::After, annexRows()).ok());
+        CHECK(projectdb::setAutoSettings(p, Stage::After, standardSettings()).ok());
+        checkV040Data(p, true);
+        checkAutoMatches(p);
+        phaseIds = reservedIds(p, Stage::After, Wire::Phase);
+        CHECK(phaseIds.exists && phaseIds.spanId > 1 && phaseIds.calcId > 1);
+        CHECK(publishNow(p));
+        p.close();
+    }
+    CHECK(scalar(path, "PRAGMA user_version") == projectdb::kSchemaVersion);
+    CHECK(scalar(path, "SELECT count(*) FROM project WHERE name = 'åäö-v040'") == 1);
+    CHECK(scalar(path, "SELECT count(*) FROM pole_before") == 3);
+    CHECK(scalar(path, "SELECT count(*) FROM pole_after") == 10);
+    CHECK(scalar(path, "SELECT count(*) FROM auto_calc") == 2);
+    CHECK(scalar(path, "SELECT count(*) FROM normal_span") == 3);
+    auto reopened = projectdb::ProjectDb::open(path, options());
+    CHECK(reopened.ok());
+    if (!reopened.ok())
+        return;
+    projectdb::ProjectDb& p = reopened.value();
+    checkV040Data(p, true);
+    checkAutoMatches(p);
+    const Reserved again = reservedIds(p, Stage::After, Wire::Phase);
+    CHECK(again.exists && again.spanId == phaseIds.spanId && again.calcId == phaseIds.calcId);
+    auto spans = projectdb::normalSpans(p);
+    CHECK(spans.ok() && autoCount(spans.value()) == 2);
+    if (spans.ok() && !spans.value().empty())
+        CHECK(spans.value()[0].id == phaseIds.spanId && spans.value()[0].poles.size() == 6);
+
+    // Läget av ger tillbaka de gamla kopplingarna, och läget på igen samma id.
+    projectdb::AutoSettings off = standardSettings();
+    off.enabled = false;
+    CHECK(projectdb::setAutoSettings(p, Stage::After, off).ok());
+    checkV040Data(p, false);
+    CHECK(projectdb::setAutoSettings(p, Stage::After, standardSettings()).ok());
+    const Reserved third = reservedIds(p, Stage::After, Wire::Phase);
+    CHECK(third.spanId == phaseIds.spanId && third.calcId == phaseIds.calcId);
+    checkAutoMatches(p);
+}
+
+// Ett projekt som skapades med steg 5 men före steg 6 (user_version 5 och bara steg 5:s tabeller,
+// utan importens rådata) migreras till steg 6: allt finns kvar, också Stolptabell efter och
+// inställningen för automatiskt läge, och de fyra pole_import-tabellerna finns och är tomma.
+void testMigrateFromStep5()
+{
+    const std::string path = join(g_share, "Från steg 5.kalkyl");
+    if (!writeV040Project(path))
+        return;
+    {
+        auto d = db::Database::open(path, db::OpenOptions{});
+        CHECK(d.ok());
+        if (!d.ok())
+            return;
+        bool ok = d.value().exec(std::string(projectdb::dev::kStep5)).ok();
+        ok = ok && d.value().exec(R"sql(
+PRAGMA user_version = 5;
+INSERT INTO pole_after(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl)
+VALUES (0, 'ST0378', '363', NULL, '348', NULL, NULL, '44.19', '255/262');
+INSERT INTO auto_mode(stage, enabled, phase_from, phase_to) VALUES ('before', 0, 'ST0378', 'ST0381');
+)sql").ok();
+        CHECK(ok);
+        if (!ok)
+            return;
+    }
+    CHECK(scalar(path, "PRAGMA user_version") == 5);
+    CHECK(scalar(path, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'pole_import%'") == 0);
+
+    auto opened = projectdb::ProjectDb::open(path, options());
+    CHECK(opened.ok());
+    if (!opened.ok()) {
+        std::cerr << opened.error().message << " / " << opened.error().detail << std::endl;
+        return;
+    }
+    projectdb::ProjectDb& p = opened.value();
+    CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
+    CHECK(countIn(p, kSeventeenTablesSql) == 17);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_import_cell") == 0);
+    auto none = projectdb::lastPoleImport(p);
+    CHECK(none.ok() && !none.value().has_value());
+    checkV040Data(p, false);
+    auto after = projectdb::poles(p, Stage::After);
+    CHECK(after.ok() && after.value().size() == 1 && after.value()[0].pole == "ST0378" &&
+          after.value()[0].spanM == "348");
+    auto settings = projectdb::autoSettings(p, Stage::Before);
+    CHECK(settings.ok() && !settings.value().enabled && settings.value().ranges[0].fromPole == "ST0378" &&
+          settings.value().ranges[0].toPole == "ST0381");
+}
+
 // Skapar projektfilen som v0.3.2 hade den: steg 1 till 3, user_version 3 och uppgifter i alla
 // tabeller. Namnet är åäö-v030. Linberäkningen är manuell med förvalen för alla fält utom
 // anteckningen, och normalspannet är kopplat till en rad.
@@ -1413,8 +2444,9 @@ void checkV030Data(projectdb::ProjectDb& p)
     CHECK(countIn(p, "SELECT count(*) FROM line_calc_case") == 15);
 }
 
-// Ett projekt som v0.3.2 hade det migreras till steg 4: allt gammalt finns kvar, Stolptabell före
-// är tom och fungerar, och tabellen med tio decimaler finns kvar efter publicering och ny öppning.
+// Ett projekt som v0.3.2 hade det migreras till det senaste steget: allt gammalt finns kvar,
+// Stolptabell före är tom och fungerar, och tabellen med tio decimaler finns kvar efter
+// publicering och ny öppning.
 void testMigrateFromV030()
 {
     const std::string path = join(g_share, "Från 0.3.0.kalkyl");
@@ -1428,8 +2460,8 @@ void testMigrateFromV030()
             return;
         }
         projectdb::ProjectDb& p = opened.value();
-        CHECK(countIn(p, "PRAGMA user_version") == 4);
-        CHECK(countIn(p, kTenTablesSql) == 10);
+        CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
+        CHECK(countIn(p, kSeventeenTablesSql) == 17);
         checkV030Data(p);
         auto none = projectdb::polesBefore(p);
         CHECK(none.ok() && none.value().empty());
@@ -1439,7 +2471,7 @@ void testMigrateFromV030()
         CHECK(publishNow(p));
         p.close();
     }
-    CHECK(scalar(path, "PRAGMA user_version") == 4);
+    CHECK(scalar(path, "PRAGMA user_version") == projectdb::kSchemaVersion);
     CHECK(scalar(path, "SELECT count(*) FROM project WHERE name = 'åäö-v030'") == 1);
     CHECK(scalar(path, "SELECT count(*) FROM pole_before") == 3);
     auto reopened = projectdb::ProjectDb::open(path, options());
@@ -1948,6 +2980,308 @@ void testLineCalcRemove()
     CHECK(projectdb::removeLineCalc(p, 9999).ok());
 }
 
+// ---- Rådata från importen av en stolptabell ----
+
+using poletable::ImportCell;
+using poletable::ImportCellKind;
+using poletable::ImportColumn;
+using poletable::ImportRecord;
+using poletable::ImportRow;
+
+// Texten i första kolumnen på första raden i en SQL-fråga mot arbetskopian, "" utan rad.
+std::string textIn(projectdb::ProjectDb& p, const std::string& sql)
+{
+    auto stmt = p.local().prepare(sql);
+    CHECK(stmt.ok());
+    if (!stmt.ok())
+        return {};
+    auto row = stmt.value().step();
+    CHECK(row.ok());
+    return row.ok() && row.value() ? stmt.value().text(0) : std::string{};
+}
+
+// En importpost till tenDecimalRows(): tre rader (Excelrad 19, 20 och 22), alla fyra cellslag, en
+// text med radbrytning, ett tal med 17 siffror och kolumner med och utan fält.
+ImportRecord sampleRecord(const std::vector<poletable::PoleRow>& rows)
+{
+    const std::string nl(1, char{10});
+    ImportRecord rec;
+    rec.fileName = "Stolptabell åäö.xlsm";
+    rec.sheetName = "Stolptabell";
+    rec.title = "Stolptabell i Banken Ver. 6 GRUNDLÄGGNING & JORDNING";
+    rec.version = "Ver. 6";
+    rec.headerFirstRow = 11;
+    rec.headerLastRow = 15;
+    rec.firstDataRow = 19;
+    rec.fromPole = rows.front().pole;
+    rec.toPole = rows.back().pole;
+    rec.columns = {{1, "A", "Internt Id", -1},
+                   {2, "B", "Objekt ID", -1},
+                   {9, "I", "Koordinater › N › SWEREF 99 TM", poletable::kNorth},
+                   {18, "R", "Profil › Stpl nr › Slutgiltigt", poletable::kPole},
+                   {23, "W", "Profil › Av › Max temp › m", poletable::kAv},
+                   {25, "Y", "", -1},
+                   {60, "BH", "Stag › E › cm", -1}};
+    rec.rows.resize(3);
+    rec.rows[0] = {19, rows[0].pole,
+                   {{1, ImportCellKind::Number, "214021"},
+                    {2, ImportCellKind::Text, "L1:0001"},
+                    {9, ImportCellKind::Number, "6512240.85"},
+                    {18, ImportCellKind::Text, rows[0].pole},
+                    {23, ImportCellKind::Number, "422.10000000000002"}}};
+    rec.rows[1] = {20, rows[1].pole,
+                   {{2, ImportCellKind::Text, "L1:0002"},
+                    {18, ImportCellKind::Text, rows[1].pole},
+                    {60, ImportCellKind::Text, "256" + nl + "256"}}};
+    rec.rows[2] = {22, rows[2].pole,
+                   {{18, ImportCellKind::Text, rows[2].pole},
+                    {23, ImportCellKind::Bool, "1"},
+                    {25, ImportCellKind::Error, "#N/A"}}};
+    return rec;
+}
+
+// Posten som lastPoleImport ska ge: samma post med tidpunkten som projektet satte.
+ImportRecord withStamp(ImportRecord rec, const std::string& stamp)
+{
+    rec.importedUtc = stamp;
+    return rec;
+}
+
+// Importen skriver raderna och rådata, och lastPoleImport ger samma post tillbaka (också efter
+// publicering och ny öppning). SQL-frågan i planen ger rätt celler per stolpe.
+void testPoleImportRoundTrip()
+{
+    const std::string path = join(g_share, "Import rådata.kalkyl");
+    const std::vector<poletable::PoleRow> rows = tenDecimalRows();
+    const ImportRecord rec = sampleRecord(rows);
+    std::string stamp;
+    {
+        auto created = projectdb::ProjectDb::create(path, "Import rådata", options());
+        CHECK(created.ok());
+        if (!created.ok())
+            return;
+        projectdb::ProjectDb& p = created.value();
+        auto none = projectdb::lastPoleImport(p);
+        CHECK(none.ok() && !none.value().has_value());
+
+        CHECK(projectdb::importPolesBefore(p, rows, rec).ok());
+        auto got = projectdb::lastPoleImport(p);
+        CHECK(got.ok() && got.value().has_value());
+        if (!got.ok() || !got.value())
+            return;
+        stamp = got.value()->importedUtc;
+        CHECK(!stamp.empty());
+        CHECK(*got.value() == withStamp(rec, stamp));
+        auto before = projectdb::polesBefore(p);
+        CHECK(before.ok() && before.value() == rows);
+
+        // Slagen och fältnamnen som de lagras.
+        CHECK(countIn(p, "SELECT count(*) FROM pole_import") == 1);
+        CHECK(countIn(p, "SELECT count(*) FROM pole_import_column") == 7);
+        CHECK(countIn(p, "SELECT count(*) FROM pole_import_row") == 3);
+        CHECK(countIn(p, "SELECT count(*) FROM pole_import_cell") == 11);
+        CHECK(countIn(p, "SELECT count(*) FROM pole_import_cell WHERE kind = 'number'") == 3);
+        CHECK(countIn(p, "SELECT count(*) FROM pole_import_cell WHERE kind = 'text'") == 6);
+        CHECK(countIn(p, "SELECT count(*) FROM pole_import_cell WHERE kind = 'bool' AND text = '1'") == 1);
+        CHECK(countIn(p, "SELECT count(*) FROM pole_import_cell WHERE kind = 'error' AND text = '#N/A'") == 1);
+        CHECK(textIn(p, "SELECT field FROM pole_import_column WHERE col = 9") == "coord_n");
+        CHECK(textIn(p, "SELECT field FROM pole_import_column WHERE col = 18") == "pole");
+        CHECK(countIn(p, "SELECT count(*) FROM pole_import_column WHERE field IS NULL") == 4);
+        CHECK(textIn(p, "SELECT text FROM pole_import_cell WHERE excel_row = 19 AND col = 23") ==
+              "422.10000000000002");
+        CHECK(textIn(p, "SELECT file_name FROM pole_import") == "Stolptabell åäö.xlsm");
+        CHECK(textIn(p, "SELECT position FROM pole_import_row WHERE excel_row = 22") == "2");
+
+        // Exemplet i planen 6.3: alla celler på en stolpe, i kolumnordning.
+        auto stmt = p.local().prepare(R"sql(
+SELECT c.letter, c.header, x.text
+FROM pole_import_row r
+JOIN pole_import_cell x ON x.excel_row = r.excel_row
+JOIN pole_import_column c ON c.col = x.col
+WHERE r.pole = 'Åkerö-ÄÖ'
+ORDER BY x.col
+)sql");
+        CHECK(stmt.ok());
+        if (stmt.ok()) {
+            std::vector<std::string> letters;
+            std::vector<std::string> texts;
+            while (true) {
+                auto step = stmt.value().step();
+                CHECK(step.ok());
+                if (!step.ok() || !step.value())
+                    break;
+                letters.push_back(stmt.value().text(0));
+                texts.push_back(stmt.value().text(2));
+            }
+            CHECK((letters == std::vector<std::string>{"B", "R", "BH"}));
+            CHECK(texts.size() == 3 && texts[0] == "L1:0002" && texts[1] == "Åkerö-ÄÖ" &&
+                  texts[2] == "256" + std::string(1, char{10}) + "256");
+        }
+        CHECK(publishNow(p));
+        p.close();
+    }
+    auto reopened = projectdb::ProjectDb::open(path, options());
+    CHECK(reopened.ok());
+    if (!reopened.ok())
+        return;
+    auto got = projectdb::lastPoleImport(reopened.value());
+    CHECK(got.ok() && got.value().has_value() && *got.value() == withStamp(rec, stamp));
+}
+
+// En andra import ersätter allt i de fyra tabellerna, och inga celler från den första finns kvar.
+void testPoleImportReplaced()
+{
+    auto created = projectdb::ProjectDb::create(join(g_share, "Import ersatt.kalkyl"), "Import ersatt", options());
+    CHECK(created.ok());
+    if (!created.ok())
+        return;
+    projectdb::ProjectDb& p = created.value();
+    const std::vector<poletable::PoleRow> first = tenDecimalRows();
+    CHECK(projectdb::importPolesBefore(p, first, sampleRecord(first)).ok());
+
+    const std::vector<poletable::PoleRow> second = {annexRows()[2], annexRows()[3]};
+    ImportRecord rec;
+    rec.fileName = "Andra.xlsx";
+    rec.sheetName = "Blad";
+    rec.headerFirstRow = 1;
+    rec.headerLastRow = 1;
+    rec.firstDataRow = 5;
+    rec.fromPole = "ST0102";
+    rec.toPole = "ST0103";
+    rec.columns = {{2, "B", "Stolpnr", poletable::kPole}, {3, "C", "N", poletable::kNorth}};
+    rec.rows = {{5, "ST0102", {{2, ImportCellKind::Text, "ST0102"}, {3, ImportCellKind::Number, "6511380"}}},
+                {6, "ST0103", {{2, ImportCellKind::Text, "ST0103"}}}};
+    CHECK(projectdb::importPolesBefore(p, second, rec).ok());
+
+    CHECK(countIn(p, "SELECT count(*) FROM pole_import") == 1);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_import_column") == 2);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_import_row") == 2);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_import_cell") == 3);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_import_row WHERE excel_row IN (19, 20, 22)") == 0);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_import_cell WHERE col NOT IN (2, 3)") == 0);
+    CHECK(textIn(p, "SELECT file_name FROM pole_import") == "Andra.xlsx");
+    auto got = projectdb::lastPoleImport(p);
+    CHECK(got.ok() && got.value().has_value());
+    if (got.ok() && got.value())
+        CHECK(*got.value() == withStamp(rec, got.value()->importedUtc));
+    auto before = projectdb::polesBefore(p);
+    CHECK(before.ok() && before.value() == second);
+}
+
+// Handändringar rör inte rådata: setPoles (båda skedena), copyBeforeToAfter, setAutoSettings och
+// en tömd Stolptabell före lämnar posten lika.
+void testPoleImportUntouched()
+{
+    auto created = projectdb::ProjectDb::create(join(g_share, "Import orörd.kalkyl"), "Import orörd", options());
+    CHECK(created.ok());
+    if (!created.ok())
+        return;
+    projectdb::ProjectDb& p = created.value();
+    const std::vector<poletable::PoleRow> rows = tenDecimalRows();
+    CHECK(projectdb::importPolesBefore(p, rows, sampleRecord(rows)).ok());
+    auto saved = projectdb::lastPoleImport(p);
+    CHECK(saved.ok() && saved.value().has_value());
+    if (!saved.ok() || !saved.value())
+        return;
+    const ImportRecord expected = *saved.value();
+
+    const auto unchanged = [&]() {
+        auto now = projectdb::lastPoleImport(p);
+        CHECK(now.ok() && now.value().has_value() && *now.value() == expected);
+    };
+    std::vector<poletable::PoleRow> changed = annexRows();
+    CHECK(projectdb::setPoles(p, Stage::Before, changed).ok());
+    unchanged();
+    changed[0].north = "1";
+    CHECK(projectdb::setPoles(p, Stage::Before, changed).ok());
+    unchanged();
+    CHECK(projectdb::setPoles(p, Stage::After, annexRows()).ok());
+    unchanged();
+    CHECK(projectdb::setAutoSettings(p, Stage::Before, standardSettings()).ok());
+    unchanged();
+    CHECK(projectdb::copyBeforeToAfter(p).ok());
+    unchanged();
+    CHECK(projectdb::setPoles(p, Stage::Before, {}).ok());
+    unchanged();
+}
+
+// Poster som inte hänger ihop ger Invalid, och inget ändras: raderna, rådata och revisionen.
+void testPoleImportInvalid()
+{
+    auto created = projectdb::ProjectDb::create(join(g_share, "Import ogiltig.kalkyl"), "Import ogiltig", options());
+    CHECK(created.ok());
+    if (!created.ok())
+        return;
+    projectdb::ProjectDb& p = created.value();
+    const std::vector<poletable::PoleRow> rows = tenDecimalRows();
+    const ImportRecord rec = sampleRecord(rows);
+    CHECK(projectdb::importPolesBefore(p, rows, rec).ok());
+    auto saved = projectdb::lastPoleImport(p);
+    CHECK(saved.ok() && saved.value().has_value());
+    if (!saved.ok() || !saved.value())
+        return;
+    const ImportRecord expected = *saved.value();
+    const std::uint64_t revision = p.revision();
+    const std::string incomplete = "Importen av stolptabellen är ofullständig och sparades inte.";
+
+    // Ett fel i posten: Invalid med den fasta texten och en detalj.
+    const auto expectIncomplete = [&](const std::vector<poletable::PoleRow>& r, const ImportRecord& bad) {
+        auto result = projectdb::importPolesBefore(p, r, bad);
+        CHECK(!result.ok());
+        if (result.ok())
+            return;
+        CHECK(result.error().code == ErrorCode::Invalid);
+        CHECK(result.error().message == incomplete);
+        CHECK(!result.error().detail.empty());
+    };
+
+    ImportRecord fewer = rec;
+    fewer.rows.pop_back();
+    expectIncomplete(rows, fewer);
+
+    ImportRecord wrongPole = rec;
+    wrongPole.rows[1].pole = "Annan";
+    expectIncomplete(rows, wrongPole);
+
+    std::vector<poletable::PoleRow> withEmpty = rows;
+    withEmpty[1] = poletable::PoleRow{};
+    ImportRecord emptyRec = rec;
+    emptyRec.rows[1].pole = "";
+    expectIncomplete(withEmpty, emptyRec);
+
+    ImportRecord sameField = rec;
+    sameField.columns[0].field = poletable::kPole;
+    expectIncomplete(rows, sameField);
+
+    ImportRecord sameColumn = rec;
+    sameColumn.columns[1].column = sameColumn.columns[0].column;
+    expectIncomplete(rows, sameColumn);
+
+    ImportRecord unknownColumn = rec;
+    unknownColumn.rows[0].cells.push_back({99, ImportCellKind::Text, "x"});
+    expectIncomplete(rows, unknownColumn);
+
+    ImportRecord sameRow = rec;
+    sameRow.rows[1].excelRow = sameRow.rows[0].excelRow;
+    expectIncomplete(rows, sameRow);
+
+    // Ett ogiltigt tal ger texten som setPoles ger.
+    std::vector<poletable::PoleRow> badNumber = rows;
+    badNumber[0].north = "6512240,85";
+    auto invalid = projectdb::importPolesBefore(p, badNumber, rec);
+    CHECK(!invalid.ok());
+    if (!invalid.ok()) {
+        CHECK(invalid.error().code == ErrorCode::Invalid);
+        CHECK(invalid.error().message == "Stolptabell före har ett ogiltigt tal på rad 1 i kolumnen Koordinat N.");
+    }
+
+    auto now = projectdb::lastPoleImport(p);
+    CHECK(now.ok() && now.value().has_value() && *now.value() == expected);
+    auto before = projectdb::polesBefore(p);
+    CHECK(before.ok() && before.value() == rows);
+    CHECK(p.revision() == revision);
+}
+
 // Ett skrivskyddat projekt ger AccessDenied för alla skrivningar och förblir oförändrat.
 void testReadOnlyWrites()
 {
@@ -1984,6 +3318,12 @@ void testReadOnlyWrites()
     CHECK(projectdb::detachLineCalc(p, 1).error().code == ErrorCode::AccessDenied);
     CHECK(projectdb::removeLineCalc(p, 1).error().code == ErrorCode::AccessDenied);
     CHECK(projectdb::setPolesBefore(p, tenDecimalRows()).error().code == ErrorCode::AccessDenied);
+    CHECK(projectdb::setPoles(p, projectdb::Stage::After, tenDecimalRows()).error().code ==
+          ErrorCode::AccessDenied);
+    CHECK(projectdb::setAutoSettings(p, projectdb::Stage::Before, {}).error().code == ErrorCode::AccessDenied);
+    CHECK(projectdb::copyBeforeToAfter(p).error().code == ErrorCode::AccessDenied);
+    CHECK(projectdb::importPolesBefore(p, tenDecimalRows(), sampleRecord(tenDecimalRows())).error().code ==
+          ErrorCode::AccessDenied);
     CHECK(!p.isModified());
     CHECK(p.revision() == 0);
     auto spans = projectdb::normalSpans(p);
@@ -1992,6 +3332,44 @@ void testReadOnlyWrites()
     CHECK(calcs.ok() && calcs.value().size() == 1);
     auto poles = projectdb::polesBefore(p);
     CHECK(poles.ok() && poles.value().empty());
+}
+
+// De lagrade automatiska beräkningarna går att läsa i ett skrivskyddat projekt, och de tre
+// skrivningarna för automatiskt läge ger AccessDenied utan att något ändras.
+void testReadOnlyAutoCalcs()
+{
+    const std::string path = join(g_share, "Skrivskyddat automatiskt.kalkyl");
+    {
+        auto created = projectdb::ProjectDb::create(path, "Skrivskyddat automatiskt", options());
+        CHECK(created.ok());
+        if (!created.ok())
+            return;
+        projectdb::ProjectDb& w = created.value();
+        CHECK(projectdb::setPoles(w, projectdb::Stage::Before, annexRows()).ok());
+        CHECK(projectdb::setAutoSettings(w, projectdb::Stage::Before, standardSettings()).ok());
+        CHECK(publishNow(w));
+    }
+    auto opened = projectdb::ProjectDb::open(path, options(projectdb::Access::ReadOnly));
+    CHECK(opened.ok());
+    if (!opened.ok())
+        return;
+    projectdb::ProjectDb& p = opened.value();
+    auto spans = projectdb::normalSpans(p);
+    CHECK(spans.ok() && spans.value().size() == 2);
+    if (spans.ok() && spans.value().size() == 2) {
+        CHECK(spans.value()[0].automatic.has_value() && spans.value()[1].automatic.has_value());
+        CHECK(spans.value()[0].poles.size() == 6);
+    }
+    auto calcs = projectdb::lineCalcs(p);
+    CHECK(calcs.ok() && calcs.value().size() == 2);
+    auto settings = projectdb::autoSettings(p, projectdb::Stage::Before);
+    CHECK(settings.ok() && settings.value() == standardSettings());
+    CHECK(projectdb::setAutoSettings(p, projectdb::Stage::Before, {}).error().code == ErrorCode::AccessDenied);
+    CHECK(projectdb::setPoles(p, projectdb::Stage::After, annexRows()).error().code == ErrorCode::AccessDenied);
+    CHECK(projectdb::copyBeforeToAfter(p).error().code == ErrorCode::AccessDenied);
+    CHECK(p.revision() == 0);
+    auto again = projectdb::normalSpans(p);
+    CHECK(again.ok() && again.value().size() == 2);
 }
 
 // Ogiltiga gränser och tal ger Invalid, och ett id som saknas ger NotFound.
@@ -2101,14 +3479,14 @@ void testPoleTableInvalid()
     auto bad = projectdb::setPolesBefore(p, rows);
     CHECK(!bad.ok() && bad.error().code == ErrorCode::Invalid);
     if (!bad.ok())
-        CHECK(bad.error().message == "Stolptabellen har ett ogiltigt tal på rad 2 i kolumnen Av.");
+        CHECK(bad.error().message == "Stolptabell före har ett ogiltigt tal på rad 2 i kolumnen Av.");
 
     rows = tenDecimalRows();
     rows[2].north = "abc";
     bad = projectdb::setPolesBefore(p, rows);
     CHECK(!bad.ok() && bad.error().code == ErrorCode::Invalid);
     if (!bad.ok())
-        CHECK(bad.error().message == "Stolptabellen har ett ogiltigt tal på rad 3 i kolumnen Koordinat N.");
+        CHECK(bad.error().message == "Stolptabell före har ett ogiltigt tal på rad 3 i kolumnen Koordinat N.");
 
     // En ogiltig rad som står sist bland tomma rader avvisas också, och inget har ändrats.
     rows = tenDecimalRows();
@@ -2118,6 +3496,17 @@ void testPoleTableInvalid()
     CHECK(p.revision() == revision);
     auto back = projectdb::polesBefore(p);
     CHECK(back.ok() && back.value() == tenDecimalRows());
+
+    // Samma fel för Stolptabell efter, med den tabellens namn, och före är orört.
+    rows = tenDecimalRows();
+    rows[1].ah = "x";
+    bad = projectdb::setPoles(p, projectdb::Stage::After, rows);
+    CHECK(!bad.ok() && bad.error().code == ErrorCode::Invalid);
+    if (!bad.ok())
+        CHECK(bad.error().message == "Stolptabell efter har ett ogiltigt tal på rad 2 i kolumnen Ah.");
+    CHECK(p.revision() == revision);
+    auto after = projectdb::poles(p, projectdb::Stage::After);
+    CHECK(after.ok() && after.value().empty());
 }
 
 // Revisionen räknas upp av varje skrivning, och en skrivning efter bilden lämnar projektet ändrat.
@@ -2149,6 +3538,19 @@ void testRevision()
     CHECK(projectdb::setPolesBefore(p, tenDecimalRows()).ok());
     CHECK(p.revision() == 3);
     CHECK(p.isModified());
+
+    // De tre skrivningarna för automatiskt läge räknar upp revisionen ett steg var, och synkningen
+    // i dem ger ingen extra uppräkning.
+    CHECK(projectdb::setAutoSettings(p, projectdb::Stage::Before, standardSettings()).ok());
+    CHECK(p.revision() == 4);
+    CHECK(projectdb::setPoles(p, projectdb::Stage::After, annexRows()).ok());
+    CHECK(p.revision() == 5);
+    CHECK(projectdb::copyBeforeToAfter(p).ok());
+    CHECK(p.revision() == 6);
+
+    // Importen av en stolptabell är en skrivning, med synkningen i samma transaktion.
+    CHECK(projectdb::importPolesBefore(p, tenDecimalRows(), sampleRecord(tenDecimalRows())).ok());
+    CHECK(p.revision() == 7);
 }
 
 // Provprojektet för röktestet: ligger kvar i KALKYL_PROV_DIR och är stängt och olåst. Det har
@@ -2184,15 +3586,19 @@ void testProvProject()
         CHECK(projectdb::saveLineCalc(p, manualCalc(t1Input(linecalc::CalcMode::Excel)),
                                       "line_calc_phase_after")
                   .ok());
-        // Stolptabell före med mockens sex rader (planen, bilaga A).
-        CHECK(projectdb::setPolesBefore(
-                  p, {poleRow("ST0378", "363", "362", "348", "6512240.85", "412181.98", "44.19", "255/262"),
-                      poleRow("ST0379", "267", "320", "375", "6511904.92", "412013.87", "28.05", ""),
-                      poleRow("ST0380", "344", "345", "264", "6511653.69", "411933.25", "22.27", "262/262"),
-                      poleRow("ST0381", "344", "374", "427", "6511247.08", "411804.35", "30.01", "262/262"),
-                      poleRow("ST0382", "378", "305", "322", "6510940.33", "411706.06", "48.54", ""),
-                      poleRow("ST0383", "181", "300", "287", "6510691.90", "411562.70", "42.00", "241/241")})
-                  .ok());
+        // Stolptabell före med bilaga A, och automatiskt läge med faslinan ST0102–ST0107 och
+        // topplinorna ST0101–ST0108. De lagrade beräkningarna ovan vilar på de tagna raderna.
+        CHECK(projectdb::setPolesBefore(p, annexRows()).ok());
+        CHECK(projectdb::setAutoSettings(p, Stage::Before, standardSettings()).ok());
+        // Stolptabell efter: en kopia där ST0104 har spannlängden 365 och ST0105 295, med ST0110
+        // (spannlängd 260) tillagd. Sträckorna och läget följer med kopian.
+        CHECK(projectdb::copyBeforeToAfter(p).ok());
+        std::vector<poletable::PoleRow> after = annexRows();
+        after[4].spanM = "365";
+        after[5].spanM = "295";
+        after.push_back(poleRow("ST0110", "270", "270", "260", "6508990.00", "411570.00", "39.0", ""));
+        CHECK(projectdb::setPoles(p, Stage::After, after).ok());
+        checkAutoMatches(p);
         CHECK(publishNow(p));
         p.close();
     }
@@ -2240,7 +3646,21 @@ int main()
     testLineCalcDetach();
     testLineCalcRemove();
     testPoleTableRoundTrip();
+    testPolesAfterRoundTrip();
+    testAutoSettingsRoundTrip();
+    testCopyBeforeToAfter();
+    testAutoCalcsSync();
+    testAutoDormantLinks();
+    testAutoGuards();
+    testAutoIssue();
+    testMigrateFromV040();
+    testMigrateFromStep5();
+    testPoleImportRoundTrip();
+    testPoleImportReplaced();
+    testPoleImportUntouched();
+    testPoleImportInvalid();
     testReadOnlyWrites();
+    testReadOnlyAutoCalcs();
     testInvalid();
     testPoleTableInvalid();
     testRevision();

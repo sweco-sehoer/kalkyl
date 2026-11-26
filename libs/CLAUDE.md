@@ -8,8 +8,10 @@ och kod som flera bibliotek använder ligger i sitt eget bibliotek.
 
 Beroendena går åt ett håll: `core` ← `platform` ← `db` ← `systemdb`/`projectdb` ← `appearance`.
 `conductor` och `tableText` beror bara på standardbiblioteket, `anCalc` beror på `tableText`,
-`lineCalc` beror på `conductor` och `tableText`, `poleTable` beror på `tableText`, `systemdb` beror på `db` och `conductor`, och `projectdb` beror på `db`, `anCalc`, `conductor`, `lineCalc`, `tableText` och `poleTable`.
+`lineCalc` beror på `conductor` och `tableText`, `poleTable` beror på `tableText`, `systemdb` beror på `db` och `conductor`, och `projectdb` beror på `db`, `anCalc`, `autoMode`, `conductor`, `lineCalc`, `tableText` och `poleTable`.
+`autoMode` beror på `poleTable` och `anCalc`; `poleGrid` beror på `glaze`, `sheetGrid`, `poleTable`, `autoMode` och `tableText`.
 `sheetGrid` beror på `glaze` och `tableText`.
+`xlsx` beror på `core`, `platform` och miniz (`kalkyl_miniz`); `poleImport` beror på `xlsx`, `poleTable`, `autoMode` och `tableText`.
 Katalogen får gärna ha versal i mitten (`anCalc`), och målet och namnrymden skrivs med gemener (`kalkyl_ancalc`, `kalkyl::ancalc`).
 Includes skrivs som `"core/result.h"`, `"platform/files.h"` och så vidare, och varje bibliotek
 exporterar `libs/` som include-katalog. Namnrymderna heter `kalkyl::core`, `kalkyl::platform` osv.
@@ -23,12 +25,16 @@ exporterar `libs/` som include-katalog. Namnrymderna heter `kalkyl::core`, `kalk
 | `tableText/` | Tabelltext: tal med decimalkomma, tabbseparerat urklipp och inklistring som rena funktioner (`kalkyl_tabletext`) |
 | `poleTable/` | Stolptabellens rader: kolumnerna, talen som kanonisk decimaltext och ändringarna som rena funktioner (`kalkyl_poletable`) |
 | `anCalc/` | Normalspannsberäkningen som rena funktioner (`kalkyl_ancalc`) |
+| `autoMode/` | Automatiskt läge som rena funktioner: sträckorna i stolptabellen, normalspannets stolpar och jämförelsen mellan Stolptabell före och efter (`kalkyl_automode`) |
 | `lineCalc/` | Linberäkningen enligt arket Linberäkning och lastfallsmallarna som rena funktioner (`kalkyl_linecalc`) |
 | `platform/` | Win32-nära hjälpmedel: text, system, filer, låsfil och filassociation (`kalkyl_platform`) |
+| `xlsx/` | Excelfiler: celler, delade strängar, talformat och sammanslagningar ur .xlsx och .xlsm med miniz, utan makron (`kalkyl_xlsx`, och `kalkyl_miniz` för zip-källorna) |
+| `poleImport/` | Importen av en stolptabell: rubrikerna, valet av kolumner, utdraget och rådata som rena funktioner (`kalkyl_poleimport`) |
 | `db/` | SQLite-lagret: `Database`, `Statement` och `migrate` (`kalkyl_db`) |
 | `systemdb/` | Systemdatabasen med inställningar, senaste projekt och linregistret med startdata (`kalkyl_systemdb`) |
 | `projectdb/` | Projektdatabasen med arbetskopia, lås och publicering (`kalkyl_projectdb`) |
 | `appearance/` | Utseende och lägesknapp för GlazeUI-fönstren (`kalkyl_appearance`) |
 | `sheetGrid/` | Excel-beteendet i en DataGrid: markering, urklipp och inklistring (`kalkyl_sheetgrid`) |
+| `poleGrid/` | Stolptabellen i en DataGrid: raderna, Excel-markeringen, papperskorgen, färgerna och snabbmenyn, delad av Stolptabell före och efter (`kalkyl_polegrid`) |
 
 Inga tester ligger här. Alla tester ligger i `tests/` i roten, byggs med `-DKALKYL_TESTS=ON` och körs med `ctest`.

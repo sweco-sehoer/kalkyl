@@ -57,6 +57,9 @@ void MainWindow::initializeComponent()
     stolpSida.name = "stolpSida";
     stolpSida.setText("Stolptabell före");
 
+    efterSida.name = "efterSida";
+    efterSida.setText("Stolptabell efter");
+
     nsSida.name = "nsSida";
     nsSida.setText("Normalspann");
 
@@ -68,6 +71,9 @@ void MainWindow::initializeComponent()
 
     stolpPanel.name = "stolpPanel";
     stolpPanel.dock = glaze::Dock::Fill;
+
+    efterPanel.name = "efterPanel";
+    efterPanel.dock = glaze::Dock::Fill;
 
     nsPanel.name = "nsPanel";
     nsPanel.dock = glaze::Dock::Fill;
@@ -142,8 +148,15 @@ void MainWindow::initializeComponent()
     stolpRubrik.x = 16;
     stolpRubrik.y = 8;
 
+    stolpImportBtn.name = "stolpImportBtn";
+    stolpImportBtn.setText("Importera stolptabell…");
+    stolpImportBtn.setImg(glaze::stockIcon(glaze::StockIcon::Import));
+    stolpImportBtn.setToolTip("Ersätter raderna i Stolptabell före med stolparna ur en stolptabell från Banken (.xlsx eller .xlsm). Start och slut, automatiskt läge och Stolptabell efter ändras inte.");
+    stolpImportBtn.anchorLeft = {"stolpRubrik", 16};
+    stolpImportBtn.y = 10;
+
     stolpInfo.name = "stolpInfo";
-    stolpInfo.setText("Klistra in från Excel med Ctrl+V i den cell där inklistringen ska börja: en cell, rader, kolumner eller ett block. Komma och punkt fungerar båda som decimaltecken, och talen visas med så många decimaler som du skriver. Skriv i den tomma raden sist för att lägga till en stolpe, och ta bort en rad med papperskorgen längst till höger.");
+    stolpInfo.setText("Klistra in från Excel med Ctrl+V i den cell där inklistringen ska börja: en cell, rader, kolumner eller ett block. Importera stolptabell… hämtar i stället stolparna ur en stolptabell från Banken. Komma och punkt fungerar båda som decimaltecken, och talen visas med så många decimaler som du skriver. Skriv i den tomma raden sist för att lägga till en stolpe, och ta bort en rad med papperskorgen längst till höger. Med automatiskt läge räknas normalspann och linberäkning för faslinan och topplinorna ur stolparna mellan start och slut, och resultaten visas i Dokumentation.");
     stolpInfo.setRole(glaze::Label::Role::Dim);
     stolpInfo.setWrap(true);
     stolpInfo.anchors = {true, true, true, false};
@@ -151,16 +164,105 @@ void MainWindow::initializeComponent()
     stolpInfo.anchorTop = {"stolpRubrik", 4};
     stolpInfo.right = 16;
 
+    stolpAutoGrp.name = "stolpAutoGrp";
+    stolpAutoGrp.setText("Automatiskt läge");
+    stolpAutoGrp.x = 16;
+    stolpAutoGrp.anchorTop = {"stolpInfo", 8};
+
+    stolpAutoChk.name = "stolpAutoChk";
+    stolpAutoChk.setText("Räkna faslinans och topplinornas normalspann och linberäkning ur tabellen");
+    stolpAutoChk.setToolTip("De automatiska beräkningarna sparas i projektet och visas på raderna före ombyggnad i Dokumentation. Kopplingar och värden som raderna hade vilar så länge och kommer tillbaka när rutan slås av.");
+    stolpAutoChk.x = 0;
+    stolpAutoChk.y = 0;
+
+    stolpFranLbl.name = "stolpFranLbl";
+    stolpFranLbl.setText("Från");
+    stolpFranLbl.setRole(glaze::Label::Role::Dim);
+    stolpFranLbl.x = 140;
+    stolpFranLbl.anchorTop = {"stolpAutoChk", 8};
+
+    stolpTillLbl.name = "stolpTillLbl";
+    stolpTillLbl.setText("Till");
+    stolpTillLbl.setRole(glaze::Label::Role::Dim);
+    stolpTillLbl.x = 310;
+    stolpTillLbl.anchorTop = {"stolpAutoChk", 8};
+
+    stolpFasLbl.name = "stolpFasLbl";
+    stolpFasLbl.setText("Faslina");
+    stolpFasLbl.x = 0;
+    stolpFasLbl.anchorTop = {"stolpFranLbl", 4};
+
+    stolpFasFran.name = "stolpFasFran";
+    stolpFasFran.setToolTip("Stolpen där linan börjar");
+    stolpFasFran.width = 160;
+    stolpFasFran.x = 140;
+    stolpFasFran.anchorTop = {"stolpFranLbl", 4};
+
+    stolpFasTill.name = "stolpFasTill";
+    stolpFasTill.setToolTip("Stolpen där linan slutar");
+    stolpFasTill.width = 160;
+    stolpFasTill.x = 310;
+    stolpFasTill.anchorTop = {"stolpFranLbl", 4};
+
+    stolpFasStatus.name = "stolpFasStatus";
+    stolpFasStatus.setRole(glaze::Label::Role::Dim);
+    stolpFasStatus.x = 480;
+    stolpFasStatus.anchorTop = {"stolpFranLbl", 4};
+
+    stolpToppVLbl.name = "stolpToppVLbl";
+    stolpToppVLbl.setText("Topplinor");
+    stolpToppVLbl.x = 0;
+    stolpToppVLbl.anchorTop = {"stolpFasFran", 4};
+
+    stolpToppVFran.name = "stolpToppVFran";
+    stolpToppVFran.setToolTip("Stolpen där linan börjar");
+    stolpToppVFran.width = 160;
+    stolpToppVFran.x = 140;
+    stolpToppVFran.anchorTop = {"stolpFasFran", 4};
+
+    stolpToppVTill.name = "stolpToppVTill";
+    stolpToppVTill.setToolTip("Stolpen där linan slutar");
+    stolpToppVTill.width = 160;
+    stolpToppVTill.x = 310;
+    stolpToppVTill.anchorTop = {"stolpFasFran", 4};
+
+    stolpToppVStatus.name = "stolpToppVStatus";
+    stolpToppVStatus.setRole(glaze::Label::Role::Dim);
+    stolpToppVStatus.x = 480;
+    stolpToppVStatus.anchorTop = {"stolpFasFran", 4};
+
+    stolpToppHLbl.name = "stolpToppHLbl";
+    stolpToppHLbl.setText("Topplina höger");
+    stolpToppHLbl.x = 0;
+    stolpToppHLbl.anchorTop = {"stolpToppVFran", 4};
+
+    stolpToppHFran.name = "stolpToppHFran";
+    stolpToppHFran.setToolTip("Stolpen där linan börjar");
+    stolpToppHFran.width = 160;
+    stolpToppHFran.x = 140;
+    stolpToppHFran.anchorTop = {"stolpToppVFran", 4};
+
+    stolpToppHTill.name = "stolpToppHTill";
+    stolpToppHTill.setToolTip("Stolpen där linan slutar");
+    stolpToppHTill.width = 160;
+    stolpToppHTill.x = 310;
+    stolpToppHTill.anchorTop = {"stolpToppVFran", 4};
+
+    stolpToppHStatus.name = "stolpToppHStatus";
+    stolpToppHStatus.setRole(glaze::Label::Role::Dim);
+    stolpToppHStatus.x = 480;
+    stolpToppHStatus.anchorTop = {"stolpToppVFran", 4};
+
     stolpGrid.name = "stolpGrid";
     stolpGrid.anchors = {true, true, true, true};
     stolpGrid.x = 16;
-    stolpGrid.anchorTop = {"stolpInfo", 8};
+    stolpGrid.anchorTop = {"stolpAutoGrp", 8};
     stolpGrid.right = 16;
     stolpGrid.bottom = 16;
     stolpGrid.setSortable(false);
     stolpGrid.setEditOnClick(false);
     stolpGrid.setHeaderLines(2);
-    stolpGrid.setColumns({{.text = "Stolpplats", .width = 120, .sizing = glaze::ColumnSizing::Autosize}, {.text = "Av", .width = 70, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Vertikal linlängd (m) som belastar stolpen. Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Ah", .width = 70, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Horisontell linlängd (m), för vindberäkningar. Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Spannlängd\nföreg.", .width = 90, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Spannlängden (m) till föregående stolpe. Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Koordinat\nN", .width = 120, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat N (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Koordinat\nE", .width = 110, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat E (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Koordinat\nH", .width = 80, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat H (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "LKL", .width = 80, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Längdklass: fackverkstolpens längd i decimeter, till exempel 262 = 26,2 m."}, {.text = "", .width = 36, .align = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Radera raden"}});
+    stolpGrid.setColumns({{.text = "Stolpnr", .width = 120, .sizing = glaze::ColumnSizing::Autosize}, {.text = "Koordinat\nN", .width = 120, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat N (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Koordinat\nE", .width = 110, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat E (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Koordinat\nH", .width = 80, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat H (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Avstånd\nföregående", .width = 90, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Spannlängden (m) till föregående stolpe. Lämnas den tom räknas den ur koordinaterna N och E (Σ). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Ah", .width = 70, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Horisontell linlängd (m), för vindberäkningar. Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Av", .width = 70, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Vertikal linlängd (m) som belastar stolpen. Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "LKL", .width = 80, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Längdklass: fackverkstolpens längd i decimeter, till exempel 262 = 26,2 m. Två klasser skrivs 227/262, också när de klistras in på två rader."},{.text = "", .width = 36, .align = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Radera raden"}});
     stolpGrid.setColumnEditor(1, {glaze::DataGrid::Editor::Text});
     stolpGrid.setColumnEditor(2, {glaze::DataGrid::Editor::Text});
     stolpGrid.setColumnEditor(3, {glaze::DataGrid::Editor::Text});
@@ -168,6 +270,183 @@ void MainWindow::initializeComponent()
     stolpGrid.setColumnEditor(5, {glaze::DataGrid::Editor::Text});
     stolpGrid.setColumnEditor(6, {glaze::DataGrid::Editor::Text});
     stolpGrid.setColumnEditor(8, {glaze::DataGrid::Editor::Button});
+
+    efterRubrik.name = "efterRubrik";
+    efterRubrik.setText("Data efter ombyggnad");
+    efterRubrik.setRole(glaze::Label::Role::Heading);
+    efterRubrik.x = 16;
+    efterRubrik.y = 8;
+
+    efterKopieraBtn.name = "efterKopieraBtn";
+    efterKopieraBtn.setText("Kopiera från Stolptabell före…");
+    efterKopieraBtn.setImg(glaze::stockIcon(glaze::StockIcon::Copy));
+    efterKopieraBtn.setToolTip("Ersätter Stolptabell efter med en kopia av Stolptabell före, med start, slut och automatiskt läge.");
+    efterKopieraBtn.anchorLeft = {"efterRubrik", 16};
+    efterKopieraBtn.y = 10;
+
+    efterInfo.name = "efterInfo";
+    efterInfo.setText("Kopiera Stolptabell före hit och ändra sedan de stolpar som byggs om. Raderna jämförs med Stolptabell före på Stolpnr: färgen visar om raden är som i före, ändrad eller ny, och tooltipen på en ändrad cell visar värdet i före. Redigering, inklistring och papperskorgen fungerar som i Stolptabell före.");
+    efterInfo.setRole(glaze::Label::Role::Dim);
+    efterInfo.setWrap(true);
+    efterInfo.anchors = {true, true, true, false};
+    efterInfo.x = 16;
+    efterInfo.anchorTop = {"efterRubrik", 6};
+    efterInfo.right = 16;
+
+    efterAutoGrp.name = "efterAutoGrp";
+    efterAutoGrp.setText("Automatiskt läge");
+    efterAutoGrp.x = 16;
+    efterAutoGrp.anchorTop = {"efterInfo", 8};
+
+    efterAutoChk.name = "efterAutoChk";
+    efterAutoChk.setText("Räkna faslinans och topplinornas normalspann och linberäkning ur tabellen");
+    efterAutoChk.setToolTip("De automatiska beräkningarna sparas i projektet och visas på raderna efter ombyggnad i Dokumentation. Kopplingar och värden som raderna hade vilar så länge och kommer tillbaka när rutan slås av.");
+    efterAutoChk.x = 0;
+    efterAutoChk.y = 0;
+
+    efterSomForeBtn.name = "efterSomForeBtn";
+    efterSomForeBtn.setText("Sträckorna som i före");
+    efterSomForeBtn.setToolTip("Hämtar start och slut ur Stolptabell före. Raderna ändras inte.");
+    efterSomForeBtn.anchorLeft = {"efterAutoChk", 16};
+    efterSomForeBtn.y = 0;
+
+    efterFranLbl.name = "efterFranLbl";
+    efterFranLbl.setText("Från");
+    efterFranLbl.setRole(glaze::Label::Role::Dim);
+    efterFranLbl.x = 140;
+    efterFranLbl.anchorTop = {"efterAutoChk", 8};
+
+    efterTillLbl.name = "efterTillLbl";
+    efterTillLbl.setText("Till");
+    efterTillLbl.setRole(glaze::Label::Role::Dim);
+    efterTillLbl.x = 310;
+    efterTillLbl.anchorTop = {"efterAutoChk", 8};
+
+    efterFasLbl.name = "efterFasLbl";
+    efterFasLbl.setText("Faslina");
+    efterFasLbl.x = 0;
+    efterFasLbl.anchorTop = {"efterFranLbl", 4};
+
+    efterFasFran.name = "efterFasFran";
+    efterFasFran.setToolTip("Stolpen där linan börjar");
+    efterFasFran.width = 160;
+    efterFasFran.x = 140;
+    efterFasFran.anchorTop = {"efterFranLbl", 4};
+
+    efterFasTill.name = "efterFasTill";
+    efterFasTill.setToolTip("Stolpen där linan slutar");
+    efterFasTill.width = 160;
+    efterFasTill.x = 310;
+    efterFasTill.anchorTop = {"efterFranLbl", 4};
+
+    efterFasStatus.name = "efterFasStatus";
+    efterFasStatus.setRole(glaze::Label::Role::Dim);
+    efterFasStatus.x = 480;
+    efterFasStatus.anchorTop = {"efterFranLbl", 4};
+
+    efterToppVLbl.name = "efterToppVLbl";
+    efterToppVLbl.setText("Topplinor");
+    efterToppVLbl.x = 0;
+    efterToppVLbl.anchorTop = {"efterFasFran", 4};
+
+    efterToppVFran.name = "efterToppVFran";
+    efterToppVFran.setToolTip("Stolpen där linan börjar");
+    efterToppVFran.width = 160;
+    efterToppVFran.x = 140;
+    efterToppVFran.anchorTop = {"efterFasFran", 4};
+
+    efterToppVTill.name = "efterToppVTill";
+    efterToppVTill.setToolTip("Stolpen där linan slutar");
+    efterToppVTill.width = 160;
+    efterToppVTill.x = 310;
+    efterToppVTill.anchorTop = {"efterFasFran", 4};
+
+    efterToppVStatus.name = "efterToppVStatus";
+    efterToppVStatus.setRole(glaze::Label::Role::Dim);
+    efterToppVStatus.x = 480;
+    efterToppVStatus.anchorTop = {"efterFasFran", 4};
+
+    efterToppHLbl.name = "efterToppHLbl";
+    efterToppHLbl.setText("Topplina höger");
+    efterToppHLbl.x = 0;
+    efterToppHLbl.anchorTop = {"efterToppVFran", 4};
+
+    efterToppHFran.name = "efterToppHFran";
+    efterToppHFran.setToolTip("Stolpen där linan börjar");
+    efterToppHFran.width = 160;
+    efterToppHFran.x = 140;
+    efterToppHFran.anchorTop = {"efterToppVFran", 4};
+
+    efterToppHTill.name = "efterToppHTill";
+    efterToppHTill.setToolTip("Stolpen där linan slutar");
+    efterToppHTill.width = 160;
+    efterToppHTill.x = 310;
+    efterToppHTill.anchorTop = {"efterToppVFran", 4};
+
+    efterToppHStatus.name = "efterToppHStatus";
+    efterToppHStatus.setRole(glaze::Label::Role::Dim);
+    efterToppHStatus.x = 480;
+    efterToppHStatus.anchorTop = {"efterToppVFran", 4};
+
+    efterSammaRuta.name = "efterSammaRuta";
+    efterSammaRuta.setText("■");
+    efterSammaRuta.setColor(gfx::Color{220, 160, 40, 255});
+    efterSammaRuta.setToolTip("Raden finns i Stolptabell före och är lika.");
+    efterSammaRuta.x = 16;
+    efterSammaRuta.anchorTop = {"efterAutoGrp", 8};
+
+    efterSammaText.name = "efterSammaText";
+    efterSammaText.setText("Som i före");
+    efterSammaText.setRole(glaze::Label::Role::Dim);
+    efterSammaText.setToolTip("Raden finns i Stolptabell före och är lika.");
+    efterSammaText.anchorLeft = {"efterSammaRuta", 4};
+    efterSammaText.anchorTop = {"efterAutoGrp", 8};
+
+    efterAndradRuta.name = "efterAndradRuta";
+    efterAndradRuta.setText("■");
+    efterAndradRuta.setColor(gfx::Color{210, 90, 140, 255});
+    efterAndradRuta.setToolTip("Raden finns i Stolptabell före, men minst ett fält skiljer sig.");
+    efterAndradRuta.anchorLeft = {"efterSammaText", 16};
+    efterAndradRuta.anchorTop = {"efterAutoGrp", 8};
+
+    efterAndradText.name = "efterAndradText";
+    efterAndradText.setText("Ändrad");
+    efterAndradText.setRole(glaze::Label::Role::Dim);
+    efterAndradText.setToolTip("Raden finns i Stolptabell före, men minst ett fält skiljer sig.");
+    efterAndradText.anchorLeft = {"efterAndradRuta", 4};
+    efterAndradText.anchorTop = {"efterAutoGrp", 8};
+
+    efterNyRuta.name = "efterNyRuta";
+    efterNyRuta.setText("■");
+    efterNyRuta.setColor(gfx::Color{70, 170, 90, 255});
+    efterNyRuta.setToolTip("Raden finns inte i Stolptabell före.");
+    efterNyRuta.anchorLeft = {"efterAndradText", 16};
+    efterNyRuta.anchorTop = {"efterAutoGrp", 8};
+
+    efterNyText.name = "efterNyText";
+    efterNyText.setText("Ny");
+    efterNyText.setRole(glaze::Label::Role::Dim);
+    efterNyText.setToolTip("Raden finns inte i Stolptabell före.");
+    efterNyText.anchorLeft = {"efterNyRuta", 4};
+    efterNyText.anchorTop = {"efterAutoGrp", 8};
+
+    efterGrid.name = "efterGrid";
+    efterGrid.anchors = {true, true, true, true};
+    efterGrid.x = 16;
+    efterGrid.anchorTop = {"efterSammaRuta", 8};
+    efterGrid.right = 16;
+    efterGrid.bottom = 16;
+    efterGrid.setSortable(false);
+    efterGrid.setEditOnClick(false);
+    efterGrid.setHeaderLines(2);
+    efterGrid.setColumns({{.text = "Stolpnr", .width = 120, .sizing = glaze::ColumnSizing::Autosize}, {.text = "Koordinat\nN", .width = 120, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat N (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Koordinat\nE", .width = 110, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat E (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Koordinat\nH", .width = 80, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Koordinat H (m). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Avstånd\nföregående", .width = 90, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Spannlängden (m) till föregående stolpe. Lämnas den tom räknas den ur koordinaterna N och E (Σ). Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Ah", .width = 70, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Horisontell linlängd (m), för vindberäkningar. Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "Av", .width = 70, .align = glaze::Align::Right, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Vertikal linlängd (m) som belastar stolpen. Komma eller punkt som decimaltecken, och decimalerna visas som du skriver dem."}, {.text = "LKL", .width = 80, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Längdklass: fackverkstolpens längd i decimeter, till exempel 262 = 26,2 m. Två klasser skrivs 227/262, också när de klistras in på två rader."},{.text = "", .width = 36, .align = glaze::Align::Center, .sizing = glaze::ColumnSizing::AutoMin, .toolTip = "Radera raden"}});
+    efterGrid.setColumnEditor(1, {glaze::DataGrid::Editor::Text});
+    efterGrid.setColumnEditor(2, {glaze::DataGrid::Editor::Text});
+    efterGrid.setColumnEditor(3, {glaze::DataGrid::Editor::Text});
+    efterGrid.setColumnEditor(4, {glaze::DataGrid::Editor::Text});
+    efterGrid.setColumnEditor(5, {glaze::DataGrid::Editor::Text});
+    efterGrid.setColumnEditor(6, {glaze::DataGrid::Editor::Text});
+    efterGrid.setColumnEditor(8, {glaze::DataGrid::Editor::Button});
 
     nsRubrik.name = "nsRubrik";
     nsRubrik.setText("Normalspannsberäkningar");
@@ -206,7 +485,7 @@ void MainWindow::initializeComponent()
     nsLista.right = 16;
     nsLista.bottom = 16;
     nsLista.setHeaderLines(2);
-    nsLista.setColumns({{.text = "Från", .width = 90}, {.text = "Till", .width = 90}, {.text = "Spann", .width = 60, .align = glaze::Align::Right}, {.text = "Totallängd\nm", .width = 90, .align = glaze::Align::Right}, {.text = "aₙ\nm", .width = 70, .align = glaze::Align::Right}, {.text = "aₙ,ΔH\nm", .width = 70, .align = glaze::Align::Right}, {.text = "Avvikelser", .width = 90, .align = glaze::Align::Right}, {.text = "Dokumentation", .width = 170}, {.text = "Anteckning", .width = 200, .sizing = glaze::ColumnSizing::Autosize}});
+    nsLista.setColumns({{.text = "Indata", .width = 110}, {.text = "Från", .width = 90}, {.text = "Till", .width = 90}, {.text = "Spann", .width = 60, .align = glaze::Align::Right}, {.text = "Totallängd\nm", .width = 90, .align = glaze::Align::Right}, {.text = "aₙ\nm", .width = 70, .align = glaze::Align::Right}, {.text = "aₙ,ΔH\nm", .width = 70, .align = glaze::Align::Right}, {.text = "Avvikelser", .width = 90, .align = glaze::Align::Right}, {.text = "Dokumentation", .width = 170}, {.text = "Anteckning", .width = 200, .sizing = glaze::ColumnSizing::Autosize}});
 
     lcRubrik.name = "lcRubrik";
     lcRubrik.setText("Linberäkningar");
@@ -255,6 +534,28 @@ void MainWindow::initializeComponent()
     stolpGrid.onKeyDown = [this](glaze::Widget* s, glaze::KeyArgs& e) { stolpGridKeyDown(s, e); };
     stolpGrid.onMouseUp = [this](glaze::Widget* s, glaze::MouseArgs& e) { stolpGridMouseUp(s, e); };
     stolpGrid.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { stolpGridContextMenu(s, e); };
+    stolpAutoChk.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { stolpAutoChkChanged(s, e); };
+    stolpFasFran.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    stolpFasTill.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    stolpToppVFran.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    stolpToppVTill.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    stolpToppHFran.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    stolpToppHTill.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    stolpImportBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { stolpImportBtnClicked(s, e); };
+    efterKopieraBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { efterKopieraBtnClicked(s, e); };
+    efterAutoChk.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { efterAutoChkChanged(s, e); };
+    efterSomForeBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { efterSomForeBtnClicked(s, e); };
+    efterFasFran.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    efterFasTill.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    efterToppVFran.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    efterToppVTill.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    efterToppHFran.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    efterToppHTill.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { rangeChanged(s, e); };
+    efterGrid.onCommit = [this](glaze::Widget* s, glaze::CellChangeArgs& e) { efterGridCommitted(s, e); };
+    efterGrid.onCellClick = [this](glaze::Widget* s, glaze::CellClickArgs& e) { efterGridCellClicked(s, e); };
+    efterGrid.onKeyDown = [this](glaze::Widget* s, glaze::KeyArgs& e) { efterGridKeyDown(s, e); };
+    efterGrid.onMouseUp = [this](glaze::Widget* s, glaze::MouseArgs& e) { efterGridMouseUp(s, e); };
+    efterGrid.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { efterGridContextMenu(s, e); };
     nsNyBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsNyBtnClicked(s, e); };
     nsAndraBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsAndraBtnClicked(s, e); };
     nsKopieraBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsKopieraBtnClicked(s, e); };
@@ -277,10 +578,12 @@ void MainWindow::initializeComponent()
     root().adopt(flikar);
     flikar.adopt(byggPmSida);
     flikar.adopt(stolpSida);
+    flikar.adopt(efterSida);
     flikar.adopt(nsSida);
     flikar.adopt(lcSida);
     byggPmSida.adopt(byggPmPanel);
     stolpSida.adopt(stolpPanel);
+    efterSida.adopt(efterPanel);
     nsSida.adopt(nsPanel);
     lcSida.adopt(lcPanel);
     byggPmPanel.adopt(byggPmRubrik);
@@ -293,8 +596,52 @@ void MainWindow::initializeComponent()
     byggPmPanel.adopt(byggPmRosa);
     byggPmPanel.adopt(byggPmGrid);
     stolpPanel.adopt(stolpRubrik);
+    stolpPanel.adopt(stolpImportBtn);
     stolpPanel.adopt(stolpInfo);
+    stolpPanel.adopt(stolpAutoGrp);
+    stolpAutoGrp.adopt(stolpAutoChk);
+    stolpAutoGrp.adopt(stolpFranLbl);
+    stolpAutoGrp.adopt(stolpTillLbl);
+    stolpAutoGrp.adopt(stolpFasLbl);
+    stolpAutoGrp.adopt(stolpFasFran);
+    stolpAutoGrp.adopt(stolpFasTill);
+    stolpAutoGrp.adopt(stolpFasStatus);
+    stolpAutoGrp.adopt(stolpToppVLbl);
+    stolpAutoGrp.adopt(stolpToppVFran);
+    stolpAutoGrp.adopt(stolpToppVTill);
+    stolpAutoGrp.adopt(stolpToppVStatus);
+    stolpAutoGrp.adopt(stolpToppHLbl);
+    stolpAutoGrp.adopt(stolpToppHFran);
+    stolpAutoGrp.adopt(stolpToppHTill);
+    stolpAutoGrp.adopt(stolpToppHStatus);
     stolpPanel.adopt(stolpGrid);
+    efterPanel.adopt(efterRubrik);
+    efterPanel.adopt(efterKopieraBtn);
+    efterPanel.adopt(efterInfo);
+    efterPanel.adopt(efterAutoGrp);
+    efterAutoGrp.adopt(efterAutoChk);
+    efterAutoGrp.adopt(efterSomForeBtn);
+    efterAutoGrp.adopt(efterFranLbl);
+    efterAutoGrp.adopt(efterTillLbl);
+    efterAutoGrp.adopt(efterFasLbl);
+    efterAutoGrp.adopt(efterFasFran);
+    efterAutoGrp.adopt(efterFasTill);
+    efterAutoGrp.adopt(efterFasStatus);
+    efterAutoGrp.adopt(efterToppVLbl);
+    efterAutoGrp.adopt(efterToppVFran);
+    efterAutoGrp.adopt(efterToppVTill);
+    efterAutoGrp.adopt(efterToppVStatus);
+    efterAutoGrp.adopt(efterToppHLbl);
+    efterAutoGrp.adopt(efterToppHFran);
+    efterAutoGrp.adopt(efterToppHTill);
+    efterAutoGrp.adopt(efterToppHStatus);
+    efterPanel.adopt(efterSammaRuta);
+    efterPanel.adopt(efterSammaText);
+    efterPanel.adopt(efterAndradRuta);
+    efterPanel.adopt(efterAndradText);
+    efterPanel.adopt(efterNyRuta);
+    efterPanel.adopt(efterNyText);
+    efterPanel.adopt(efterGrid);
     nsPanel.adopt(nsRubrik);
     nsPanel.adopt(nsNyBtn);
     nsPanel.adopt(nsAndraBtn);

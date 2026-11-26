@@ -26,26 +26,50 @@ const std::string kNoField;
 
 } // namespace
 
-// Sant för talkolumnerna 1-6.
+// Sant för talkolumnerna 1-6, alla kolumner utom Stolpnr och LKL.
 bool isNumberColumn(int column)
 {
-    return column >= kAv && column <= kHeight;
+    return column > kPole && column < kLkl;
 }
 
 // Kolumnens namn i meddelanden. Tom text utanför 0-7.
 std::string columnName(int column)
 {
     switch (column) {
-    case kPole: return "Stolpplats";
-    case kAv: return "Av";
-    case kAh: return "Ah";
-    case kSpan: return "Spannlängd föreg.";
+    case kPole: return "Stolpnr";
     case kNorth: return "Koordinat N";
     case kEast: return "Koordinat E";
     case kHeight: return "Koordinat H";
+    case kSpan: return "Avstånd föregående";
+    case kAh: return "Ah";
+    case kAv: return "Av";
     case kLkl: return "LKL";
     default: return std::string();
     }
+}
+
+// LKL: delarna mellan radbrytningar och snedstreck, trimmade och utan tomma, med "/" emellan.
+std::string normalizeLkl(std::string_view text)
+{
+    std::string out;
+    std::string part;
+    const auto flush = [&out, &part] {
+        const std::string t = tabletext::trimmed(part);
+        if (!t.empty()) {
+            if (!out.empty())
+                out += '/';
+            out += t;
+        }
+        part.clear();
+    };
+    for (const char ch : text) {
+        if (ch == char{10} || ch == char{13} || ch == '/')
+            flush();
+        else
+            part += ch;
+    }
+    flush();
+    return out;
 }
 
 // Fältet för kolumnen 0-7, för läsning. Utanför 0-7 ges ett tomt fält.
@@ -65,7 +89,7 @@ const std::string& field(const PoleRow& row, int column)
 }
 
 // Fältet för kolumnen 0-7, för skrivning. Anroparen ska ha kontrollerat kolumnen;
-// utanför 0-7 ges Stolpplats.
+// utanför 0-7 ges Stolpnr.
 std::string& field(PoleRow& row, int column)
 {
     switch (column) {
@@ -87,6 +111,8 @@ std::optional<std::string> acceptField(int column, std::string_view text)
         return std::nullopt;
     if (isNumberColumn(column))
         return tabletext::normalizeDecimal(text);
+    if (column == kLkl)
+        return normalizeLkl(text);
     return tabletext::trimmed(text);
 }
 
@@ -122,7 +148,7 @@ bool isEmptyRow(const PoleRow& row)
 // Första talkolumnen vars text inte är tom eller kanonisk decimaltext.
 std::optional<int> firstInvalidColumn(const PoleRow& row)
 {
-    for (int c = kAv; c <= kHeight; ++c) {
+    for (int c = kPole + 1; c < kLkl; ++c) {
         const std::string& value = field(row, c);
         if (value.empty())
             continue;

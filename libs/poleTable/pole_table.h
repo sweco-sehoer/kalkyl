@@ -6,15 +6,16 @@
 
 namespace kalkyl::poletable {
 
-// Kolumnerna i stolptabellen i tabellens ordning. Kolumn 1-6 är tal, 0 och 7 är text.
-// Radera-kolumnen hör till fönstret och räknas inte här.
-inline constexpr int kPole = 0;       // Stolpplats
-inline constexpr int kAv = 1;         // Av
-inline constexpr int kAh = 2;         // Ah
-inline constexpr int kSpan = 3;       // Spannlängd föreg.
-inline constexpr int kNorth = 4;      // Koordinat N
-inline constexpr int kEast = 5;       // Koordinat E
-inline constexpr int kHeight = 6;     // Koordinat H
+// Kolumnerna i stolptabellen i tabellens ordning, samma ordning som i stolptabellerna som
+// klistras in. Kolumn 1-6 är tal, 0 och 7 är text. Radera-kolumnen hör till fönstret och
+// räknas inte här.
+inline constexpr int kPole = 0;       // Stolpnr
+inline constexpr int kNorth = 1;      // Koordinat N
+inline constexpr int kEast = 2;       // Koordinat E
+inline constexpr int kHeight = 3;     // Koordinat H
+inline constexpr int kSpan = 4;       // Avstånd föregående (spannlängden)
+inline constexpr int kAh = 5;         // Ah
+inline constexpr int kAv = 6;         // Av
 inline constexpr int kLkl = 7;        // LKL
 inline constexpr int kColumnCount = 8;
 
@@ -43,8 +44,13 @@ std::string columnName(int column);
 const std::string& field(const PoleRow& row, int column);
 std::string& field(PoleRow& row, int column);
 
-// Texten som den lagras: text trimmas, tal blir kanonisk decimaltext ("" för tomt).
-// Tomt svar = passar inte: inte ett tal i en talkolumn, eller kolumnen finns inte.
+// LKL i formen "227/262": delarna skilda med radbrytningar (också tomma rader) eller snedstreck
+// trimmas och skrivs med ett snedstreck emellan. "227", "227/262", "227\n262" och "227\n\n262"
+// ger "227", "227/262", "227/262" och "227/262".
+std::string normalizeLkl(std::string_view text);
+
+// Texten som den lagras: text trimmas (LKL via normalizeLkl), tal blir kanonisk decimaltext
+// ("" för tomt). Tomt svar = passar inte: inte ett tal i en talkolumn, eller kolumnen finns inte.
 std::optional<std::string> acceptField(int column, std::string_view text);
 
 // Cellens text i tabellen: tal med decimalkomma, de lagrade decimalerna och heltalsdelen

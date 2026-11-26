@@ -342,6 +342,94 @@ Result<void> SystemDb::setAutosaveMinutes(int minutes)
     return setSetting("autosave_minutes", std::to_string(minutes));
 }
 
+// Mappen där Importera stolptabell… öppnar filväljaren, tom när inget är sparat.
+// Den är skild från last_folder, eftersom Excelfilerna ofta ligger i en annan mapp än projekten.
+std::string SystemDb::lastImportFolder()
+{
+    return setting("last_import_folder");
+}
+
+// Sparar importmappen, filens mapp efter en lyckad import.
+Result<void> SystemDb::setLastImportFolder(const std::string& folder)
+{
+    return setSetting("last_import_folder", folder);
+}
+
+namespace {
+
+// Högsta antal inlärda rubriker per fält.
+constexpr int kMaxLearnedPerField = 10;
+constexpr int kLearnedFieldCount = 8;
+
+// Tolkar värdet i pole_import_learned: en rad per rubrik, fältet och rubriken skilda med en tabb.
+// Rader som inte går att tolka hoppas över.
+std::vector<LearnedHeader> parseLearned(const std::string& value)
+{
+    std::vector<LearnedHeader> list;
+    std::size_t start = 0;
+    while (start <= value.size()) {
+        std::size_t end = value.find(char{10}, start);
+        if (end == std::string::npos)
+            end = value.size();
+        const std::string line = value.substr(start, end - start);
+        start = end + 1;
+        const std::size_t tab = line.find(char{9});
+        if (tab == std::string::npos || tab == 0 || tab + 1 >= line.size())
+            continue;
+        int field = 0;
+        const auto r = std::from_chars(line.data(), line.data() + tab, field);
+        if (r.ec != std::errc() || r.ptr != line.data() + tab || field < 0 || field >= kLearnedFieldCount)
+            continue;
+        list.push_back({field, line.substr(tab + 1)});
+    }
+    return list;
+}
+
+// Skriver listan som värdet i pole_import_learned, en rad per rubrik.
+std::string formatLearned(const std::vector<LearnedHeader>& list)
+{
+    std::string value;
+    for (const LearnedHeader& h : list) {
+        if (!value.empty())
+            value += char{10};
+        value += std::to_string(h.field) + char{9} + h.key;
+    }
+    return value;
+}
+
+} // namespace
+
+// De inlärda rubrikerna, senast först. Fel vid läsning ger en tom lista.
+std::vector<LearnedHeader> SystemDb::learnedHeaders()
+{
+    return parseLearned(setting("pole_import_learned"));
+}
+
+// Lägger rubriken först för fältet och tar bort en tidigare likadan. Högst kMaxLearnedPerField
+// rubriker per fält behålls, de senaste.
+Result<void> SystemDb::learnHeader(int field, const std::string& key)
+{
+    if (field < 0 || field >= kLearnedFieldCount)
+        return makeError(ErrorCode::Invalid, "Ogiltigt fält för den inlärda rubriken.",
+                         "field " + std::to_string(field));
+    if (key.empty() || key.find(char{9}) != std::string::npos || key.find(char{10}) != std::string::npos ||
+        key.find(char{13}) != std::string::npos)
+        return makeError(ErrorCode::Invalid, "Ogiltig rubrik att lära in.");
+
+    std::vector<LearnedHeader> list;
+    list.push_back({field, key});
+    for (const LearnedHeader& h : learnedHeaders())
+        if (!(h.field == field && h.key == key))
+            list.push_back(h);
+
+    std::vector<LearnedHeader> kept;
+    int perField[kLearnedFieldCount] = {};
+    for (const LearnedHeader& h : list)
+        if (perField[h.field]++ < kMaxLearnedPerField)
+            kept.push_back(h);
+    return setSetting("pole_import_learned", formatLearned(kept));
+}
+
 // De senaste projekten, senast öppnade först. Vid lika tid avgör radordningen.
 Result<std::vector<RecentProject>> SystemDb::recentProjects()
 {

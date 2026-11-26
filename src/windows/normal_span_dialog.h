@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "anCalc/normal_span.h"
+#include "projectdb/project_data.h"
 #include "projectdb/project_db.h"
 
 // Normalspannsberäkningen: formuläret med tabellen som i Excel och resultatet.
@@ -246,7 +247,8 @@ private:
     std::int64_t copyOfId_ = 0;               // beräkningen som kopieras, 0 = ingen
     std::vector<std::pair<std::string, std::string>> docLabels_;   // radtext per nyckel
     bool readOnly_ = false;
-    bool dirty_ = false;                      // något är ändrat sedan inläsningen
+    std::optional<kalkyl::projectdb::AutoOrigin> automatic_;   // satt för en automatisk beräkning
+    bool dirty_ = false;                     // något är ändrat sedan inläsningen
     bool saved_ = false;                      // sparat: onClosing frågar inte
     std::optional<std::int64_t> savedId_;
     kalkyl::ancalc::SpanCalculation calc_;      // senaste beräkningen

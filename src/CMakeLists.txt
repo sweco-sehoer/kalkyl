@@ -7,6 +7,7 @@ glaze_add_window(KALKYL_WINDOWS
     windows/line_calc_info_dialog
     windows/main_window
     windows/normal_span_dialog
+    windows/pole_import_dialog
     windows/project_picker)
 
 # Programmet. WIN32 ger en GUI-exe utan konsol.
@@ -23,9 +24,13 @@ target_link_libraries(kalkyl PRIVATE
     kalkyl_platform
     kalkyl_conductor
     kalkyl_ancalc
+    kalkyl_automode
     kalkyl_linecalc
     kalkyl_sheetgrid
+    kalkyl_polegrid
     kalkyl_poletable
+    kalkyl_xlsx
+    kalkyl_poleimport
     kalkyl_tabletext
     kalkyl_systemdb
     kalkyl_projectdb

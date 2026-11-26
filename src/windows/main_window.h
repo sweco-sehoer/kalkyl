@@ -12,12 +12,13 @@
 #include <vector>
 
 #include "anCalc/normal_span.h"
+#include "autoMode/auto_mode.h"
 #include "conductor/conductor.h"
 #include "lineCalc/line_calc.h"
+#include "poleGrid/pole_grid.h"
 #include "poleTable/pole_table.h"
 #include "projectdb/project_data.h"
 #include "projectdb/project_db.h"
-#include "sheetGrid/sheet_grid.h"
 #include "systemdb/system_db.h"
 
 // Huvudfönstret: programikon (stor först med verktygsfält), menyer och lägesknapp i namnlisten,
@@ -36,6 +37,7 @@ private:
     glaze::TabControl flikar;
     glaze::TabPage byggPmSida;
     glaze::TabPage stolpSida;
+    glaze::TabPage efterSida;
     glaze::TabPage nsSida;
     glaze::TabPage lcSida;
     glaze::Panel byggPmPanel;
@@ -49,9 +51,54 @@ private:
     glaze::Label byggPmRosa;
     glaze::DataGrid byggPmGrid;
     glaze::Panel stolpPanel;
+    glaze::Panel efterPanel;
     glaze::Label stolpRubrik;
+    glaze::Button stolpImportBtn;
     glaze::Label stolpInfo;
     glaze::DataGrid stolpGrid;
+    glaze::GroupBox stolpAutoGrp;
+    glaze::Checkbox stolpAutoChk;
+    glaze::Label stolpFranLbl;
+    glaze::Label stolpTillLbl;
+    glaze::Label stolpFasLbl;
+    glaze::Dropdown stolpFasFran;
+    glaze::Dropdown stolpFasTill;
+    glaze::Label stolpFasStatus;
+    glaze::Label stolpToppVLbl;
+    glaze::Dropdown stolpToppVFran;
+    glaze::Dropdown stolpToppVTill;
+    glaze::Label stolpToppVStatus;
+    glaze::Label stolpToppHLbl;
+    glaze::Dropdown stolpToppHFran;
+    glaze::Dropdown stolpToppHTill;
+    glaze::Label stolpToppHStatus;
+    glaze::Label efterRubrik;
+    glaze::Button efterKopieraBtn;
+    glaze::Label efterInfo;
+    glaze::GroupBox efterAutoGrp;
+    glaze::Checkbox efterAutoChk;
+    glaze::Button efterSomForeBtn;
+    glaze::Label efterFranLbl;
+    glaze::Label efterTillLbl;
+    glaze::Label efterFasLbl;
+    glaze::Dropdown efterFasFran;
+    glaze::Dropdown efterFasTill;
+    glaze::Label efterFasStatus;
+    glaze::Label efterToppVLbl;
+    glaze::Dropdown efterToppVFran;
+    glaze::Dropdown efterToppVTill;
+    glaze::Label efterToppVStatus;
+    glaze::Label efterToppHLbl;
+    glaze::Dropdown efterToppHFran;
+    glaze::Dropdown efterToppHTill;
+    glaze::Label efterToppHStatus;
+    glaze::Label efterSammaRuta;
+    glaze::Label efterSammaText;
+    glaze::Label efterAndradRuta;
+    glaze::Label efterAndradText;
+    glaze::Label efterNyRuta;
+    glaze::Label efterNyText;
+    glaze::DataGrid efterGrid;
     glaze::Panel nsPanel;
     glaze::Panel lcPanel;
     glaze::Label nsRubrik;
@@ -140,7 +187,8 @@ private:
 
     // Högerklick i Dokumentation: meny för linraderna (uppdatera från linregistret) och för de
     // sex normalspannsraderna och de sex linberäkningsraderna (lägg till, koppla, ändra, ta bort).
-    // Tom meny ger ingen meny.
+    // En rad som visar en automatisk beräkning har bara Visa… och Gå till tabellen. Tom meny ger
+    // ingen meny.
     void byggPmGridContextMenu(glaze::Widget* sender, glaze::ContextMenuArgs& e);
 
     // Ny beräkning…: öppnar formuläret för en lös beräkning, utan koppling till en rad i
@@ -165,7 +213,8 @@ private:
     // Valet i listan ändrades: knapparna aktiveras bara när en rad är vald.
     void nsListaChanged(glaze::Widget* sender, glaze::ChangeArgs& e);
 
-    // Högerklick i listan: Ändra (eller Visa), Kopiera och Ta bort för raden under pekaren.
+    // Högerklick i listan: Ändra (eller Visa), Kopiera och Ta bort för raden under pekaren. För en
+    // automatisk beräkning: Visa…, Kopiera… och Gå till tabellen.
     void nsListaContextMenu(glaze::Widget* sender, glaze::ContextMenuArgs& e);
 
     // Ny beräkning…: öppnar formuläret Linberäkning för en lös, manuell beräkning. Kopplingar till
@@ -189,7 +238,8 @@ private:
     // Valet i listan ändrades: knapparna aktiveras bara när en rad är vald.
     void lcListaChanged(glaze::Widget* sender, glaze::ChangeArgs& e);
 
-    // Högerklick i listan: Ändra (eller Visa), Kopiera och Ta bort för raden under pekaren.
+    // Högerklick i listan: Ändra (eller Visa), Kopiera och Ta bort för raden under pekaren. För en
+    // automatisk beräkning: Visa…, Kopiera… och Gå till tabellen.
     void lcListaContextMenu(glaze::Widget* sender, glaze::ContextMenuArgs& e);
 
     // Läser projektets uppgifter: Dokumentationens värden och referenser (med förval för det som
@@ -213,20 +263,22 @@ private:
     // tillståndet: lika, avvikande kopia, lina som saknas i registret eller tomt register.
     void fillConductorChoices();
 
-    // Läser om alla normalspannsberäkningar ur projektet, räknar dem och uppdaterar raderna i
-    // Dokumentation och listan i fliken Normalspann.
+    // Läser om alla normalspannsberäkningar ur projektet, räknar dem (projectdb::calculateSpan) och
+    // uppdaterar raderna i Dokumentation och listan i fliken Normalspann.
     void refreshNormalSpans();
 
-    // Värde-cellen på de sex normalspannsraderna: aₙ med Σ-bild när en beräkning är kopplad,
-    // annars det manuella värdet eller "-". Tooltipen säger vad som gäller.
+    // Värde-cellen på de sex normalspannsraderna: aₙ med Σ-bild när en beräkning är kopplad (Sync-
+    // bild för en automatisk), annars det manuella värdet eller "-". Tooltipen säger vad som gäller.
     void showNormalSpanRows();
 
     // Bygger raderna i listan i fliken Normalspann ur normalSpans_ och nsCalcs_, med gul växlande
-    // radton. Den tidigare valda beräkningen väljs igen.
+    // radton. De automatiska beräkningarna har Sync-bild, Indata Automatisk och lila eller rosa
+    // ton. Den tidigare valda beräkningen väljs igen.
     void fillNormalSpanList();
 
     // Aktiverar knapparna i fliken Normalspann efter valet och skrivskyddat läge, och ger listan
-    // en tooltip om den valda beräkningen (avvikelser per kontroll och var den visas).
+    // en tooltip om den valda beräkningen (avvikelser per kontroll och var den visas). För en
+    // automatisk beräkning heter Ändra… Visa… och Ta bort är släckt.
     void updateNsButtons();
 
     // Öppnar formuläret modalt. rowKey kopplar en ny beräkning till en rad i Dokumentation när
@@ -242,15 +294,18 @@ private:
     void refreshLineCalcs();
 
     // Värde-cellen på de sex linberäkningsraderna: stakningsmallen med Σ-bild när en beräkning är
-    // kopplad, annars det manuella värdet eller "-". Tooltipen säger vad som gäller.
+    // kopplad (Sync-bild för en automatisk), annars det manuella värdet eller "-". Tooltipen säger
+    // vad som gäller.
     void showLineCalcRows();
 
     // Bygger raderna i listan i fliken Linberäkning ur lineCalcs_, lcResolved_ och lcCalcs_, med gul
-    // växlande radton. Den tidigare valda beräkningen väljs igen.
+    // växlande radton. De automatiska beräkningarna har Sync-bild, Indata Automatisk och lila eller
+    // rosa ton. Den tidigare valda beräkningen väljs igen.
     void fillLineCalcList();
 
     // Aktiverar knapparna i fliken Linberäkning efter valet och skrivskyddat läge, och ger listan
     // en tooltip om den valda beräkningen (första upplysningen eller mallen, och var den visas).
+    // För en automatisk beräkning heter Ändra… Visa… och Ta bort är släckt.
     void updateLcButtons();
 
     // Öppnar formuläret Linberäkning modalt. rowKey kopplar en ny beräkning till en rad i
@@ -314,63 +369,132 @@ private:
     // Sant när projektet är öppnat skrivskyddat.
     bool readOnly() const;
 
-    // En cell i Stolptabell före sparades. Ogiltigt tal i en talkolumn återställs tyst, annars
-    // skrivs fältet om i visningsform och tabellen sparas. Skriver man i den tomma raden sist
-    // läggs en ny stolpe till.
+    // Rutan Automatiskt läge i Stolptabell före: slår läget på eller av och sparar det i projektet.
+    void stolpAutoChkChanged(glaze::Widget* sender, glaze::ChangeArgs& e);
+
+    // Rutan Automatiskt läge i Stolptabell efter: slår läget på eller av och sparar det i projektet.
+    void efterAutoChkChanged(glaze::Widget* sender, glaze::ChangeArgs& e);
+
+    // En av de tolv rullistorna Från och Till: skriver den valda Stolpplatsen i skedets sträcka
+    // för linan och sparar inställningen. Avsändaren hittas bland panelernas rullistor.
+    void rangeChanged(glaze::Widget* sender, glaze::ChangeArgs& e);
+
+    // Importera stolptabell…: öppnar importen av en stolptabell från Banken till Stolptabell före.
+    // Själva flödet står i importPolesAsked.
+    void stolpImportBtnClicked(glaze::Widget* sender, glaze::ClickArgs& e);
+
+    // Kopiera från Stolptabell före…: frågar när efter har rader och ersätter sedan efter med en
+    // kopia av före, med sträckor och läge.
+    void efterKopieraBtnClicked(glaze::Widget* sender, glaze::ClickArgs& e);
+
+    // Sträckorna som i före: hämtar start och slut ur före utan att röra raderna i efter.
+    void efterSomForeBtnClicked(glaze::Widget* sender, glaze::ClickArgs& e);
+
+    // Tabellernas händelser går vidare till PoleGrid: en sparad cell, radera-knappen, tangenterna,
+    // musen och högerklicket. Stolptabell före först och Stolptabell efter sedan.
     void stolpGridCommitted(glaze::Widget* sender, glaze::CellChangeArgs& e);
-
-    // Ett klick på radera-knappen i Stolptabell före. Frågan postas, så att tabellen inte ändras
-    // mitt i sin egen händelse.
     void stolpGridCellClicked(glaze::Widget* sender, glaze::CellClickArgs& e);
-
-    // Tangenter, musen och högerklick i Stolptabell före går vidare till Excel-markeringen.
     void stolpGridKeyDown(glaze::Widget* sender, glaze::KeyArgs& e);
     void stolpGridMouseUp(glaze::Widget* sender, glaze::MouseArgs& e);
     void stolpGridContextMenu(glaze::Widget* sender, glaze::ContextMenuArgs& e);
+    void efterGridCommitted(glaze::Widget* sender, glaze::CellChangeArgs& e);
+    void efterGridCellClicked(glaze::Widget* sender, glaze::CellClickArgs& e);
+    void efterGridKeyDown(glaze::Widget* sender, glaze::KeyArgs& e);
+    void efterGridMouseUp(glaze::Widget* sender, glaze::MouseArgs& e);
+    void efterGridContextMenu(glaze::Widget* sender, glaze::ContextMenuArgs& e);
 
-    // Adaptern mellan stolptabellen och SheetGrid: vad en cell kopieras som (poletable::copyText),
-    // radtonen, inklistrade ändringar och snabbmenyns egna poster (Infoga rad ovanför, Radera rader…).
-    class PoleSheetHost : public kalkyl::sheetgrid::SheetHost {
+    // Det PoleGrid frågar fönstret om för en av stolptabellerna: sparar tabellen i projektet,
+    // läser om den efter ett fel, räknar om när den ändrats, följer en omdöpt Stolpplats i
+    // sträckorna, lägger menyn Sträcka i snabbmenyn och ger noten i frågan Radera.
+    class PoleHost : public kalkyl::polegrid::PoleGridHost {
     public:
-        explicit PoleSheetHost(MainWindow& window) : window_(window) {}
-        std::string copyText(int row, int column) const override;
-        std::optional<gfx::Color> baseColor(int row, int column) const override;
-        void applyEdits(const std::vector<kalkyl::sheetgrid::CellEdit>& edits) override;
-        void addMenuItems(glaze::Menu& menu, const kalkyl::sheetgrid::CellRect& selection) override;
+        PoleHost(MainWindow& window, kalkyl::projectdb::Stage stage) : window_(window), stage_(stage) {}
+        bool savePoles(const std::vector<kalkyl::poletable::PoleRow>& rows) override;
+        std::vector<kalkyl::poletable::PoleRow> reloadPoles() override;
+        void polesChanged() override;
+        void poleRenamed(const std::string& from, const std::string& to) override;
+        void addMenuItems(glaze::Menu& menu, int row) override;
+        std::string removeNote(int first, int last) const override;
         void showStatus(const std::string& text) override;
 
     private:
         MainWindow& window_;
+        kalkyl::projectdb::Stage stage_;
     };
 
-    // Läser stolptabellen ur projektet till poleRows_ och poleSaved_. Ett fel ger en
-    // meddelanderuta och en tom tabell.
-    void loadPoleTable();
+    // Panelen Automatiskt läge för ett skede: pekare till widgetarna i regionen. itemPoles har
+    // varje rullistposts Stolpplats (post 0 är tom) och itemTexts det som visas, så att en
+    // rullista bara byggs om när innehållet ändrats.
+    struct AutoPanel {
+        glaze::Checkbox* check = nullptr;
+        std::array<glaze::Label*, 3> names{};
+        std::array<glaze::Dropdown*, 6> drops{};
+        std::array<glaze::Label*, 3> status{};
+        std::array<std::vector<std::string>, 6> itemPoles;
+        std::array<std::vector<std::string>, 6> itemTexts;
+    };
 
-    // Bygger om hela tabellen ur poleRows_ med den tomma raden sist, ger raderna knappar och
-    // ton och sätter tillbaka den aktuella cellen, som setRows nollar.
-    void fillPoleGrid();
+    // Läser båda stolptabellerna och inställningarna för automatiskt läge ur projektet till
+    // tabellerna och autoBefore_ och autoAfter_. Ett fel ger en meddelanderuta och en tom tabell.
+    void loadPoleTables();
 
-    // Radera-kolumnen får radtonen (kolumn 0-7 målas av SheetGrid via baseColor). En datarad i
-    // ett skrivbart projekt får en radera-knapp med papperskorg, annars är cellen låst.
-    void decoratePoleRow(int row);
+    // Sparar hela tabellen för skedet i projektet. Vid fel loggas det och en ruta visas.
+    // Svarar om det lyckades.
+    bool savePoles(kalkyl::projectdb::Stage stage, const std::vector<kalkyl::poletable::PoleRow>& rows);
 
-    // Radens gula ton: varannan rad en aning mörkare, som temperaturraderna i Dokumentation.
-    gfx::Color poleTone(int row) const;
+    // Tabellens rader som de står i projektet. Vid fel loggas det och listan är tom.
+    std::vector<kalkyl::poletable::PoleRow> reloadPoles(kalkyl::projectdb::Stage stage);
 
-    // Skriver inklistrade och raderade celler i poleRows_ (nya rader läggs till), bygger om
-    // tabellen och sparar.
-    void applyPoleEdits(const std::vector<kalkyl::sheetgrid::CellEdit>& edits);
+    // Läser om de automatiska beräkningarna ur projektet och uppdaterar Dokumentation, flikarna
+    // Normalspann och Linberäkning, panelerna Automatiskt läge och tabellernas färger.
+    void refreshAutomatic();
 
-    // Skriver hela stolptabellen i projektets arbetskopia om den skiljer sig från det senast
-    // sparade. Vid fel visas en ruta och tabellen läses om. Svarar om det lyckades.
-    bool savePoleTable();
+    // Fyller panelerna Automatiskt läge för båda skedena.
+    void updateAutoPanels();
 
-    // Infogar en tom rad i poleRows_ vid row, markerar den och sparar.
-    void insertPoleRowAbove(int row);
+    // Fyller panelen för skedet: rutan, linornas namn, rullistorna med tabellens Stolpplatser
+    // och statustexten för varje sträcka. Höger-raden döljs när topplinorna är samma.
+    void fillAutoPanel(kalkyl::projectdb::Stage stage);
 
-    // Frågar "Radera stolpplats …?" och tar vid Ja bort raderna first till last (dataraderna).
-    void removePoleRowsAsked(int first, int last);
+    // Räknar om markeringarna och jämförelsen mot före och ger dem till tabellerna.
+    void updatePoleLooks();
+
+    // Sparar inställningen för skedet. Vid fel visas en ruta och inställningen läses om.
+    void saveAutoSettings(kalkyl::projectdb::Stage stage, const kalkyl::projectdb::AutoSettings& settings);
+
+    // De linor som är automatiska i Dokumentations läge: faslinan, topplina vänster och topplina
+    // höger när den är en egen lina.
+    std::vector<kalkyl::projectdb::Wire> activeWires() const;
+
+    // Skedets sträckor med linornas ord, för de aktiva linorna, till markeringarna i tabellen.
+    std::vector<kalkyl::automode::NamedRange> namedRanges(kalkyl::projectdb::Stage stage) const;
+
+    // Undermenyn Sträcka i tabellens snabbmeny för raden row: sätter start eller slut för en lina.
+    void addRangeMenuItems(kalkyl::projectdb::Stage stage, glaze::Menu& menu, int row);
+
+    // En Stolpplats döptes om: sträckor som börjar eller slutar där följer med.
+    void renameInRanges(kalkyl::projectdb::Stage stage, const std::string& from, const std::string& to);
+
+    // Noten i frågan Radera: vilka sträckor som börjar eller slutar på raderna first till last.
+    // Tom text när ingen gör det.
+    std::string rangeNote(kalkyl::projectdb::Stage stage, int first, int last) const;
+
+    // Kopiera från Stolptabell före…: kontrollerna, frågan och kopieringen.
+    void copyBeforeToAfterAsked();
+
+    // Importera stolptabell…: väljer filen, öppnar dialogen PoleImportDialog och skriver sedan bara
+    // raderna i Stolptabell före (projectdb::importPolesBefore). Sträckorna, läget, Stolptabell efter
+    // och Dokumentation rörs inte. Visar felet i en ruta och annars resultatet i statusraden.
+    void importPolesAsked();
+
+    // Väljer fliken för skedet och gör raden row aktuell i tabellen (row < 0 väljer bara fliken).
+    void showPoleTab(kalkyl::projectdb::Stage stage, int row);
+
+    // Tabellen och inställningen för skedet.
+    kalkyl::polegrid::PoleGrid& poleGridOf(kalkyl::projectdb::Stage stage) const;
+    kalkyl::projectdb::AutoSettings& settingsOf(kalkyl::projectdb::Stage stage);
+    const kalkyl::projectdb::AutoSettings& settingsOf(kalkyl::projectdb::Stage stage) const;
+    AutoPanel& panelOf(kalkyl::projectdb::Stage stage);
 
     // Visar en kort text i statusradens panel för tabellens meddelanden.
     void setPoleStatus(const std::string& text);
@@ -405,11 +529,15 @@ private:
     int savePanel_ = -1;                                             // sparpanelens plats i statusraden
     std::string saveStatus_;                                         // senaste sparutfallet
     bool saveStatusIsError_ = false;                                 // utfallet var ett fel
-    std::vector<kalkyl::poletable::PoleRow> poleRows_;               // stolptabellens rader, utan den tomma raden sist
-    std::vector<kalkyl::poletable::PoleRow> poleSaved_;              // det senast sparade
-    std::unique_ptr<PoleSheetHost> poleHost_;                        // adaptern mot SheetGrid
-    std::unique_ptr<kalkyl::sheetgrid::SheetGrid> poleSheet_;        // Excel-markeringen i stolpGrid
+    std::unique_ptr<PoleHost> beforeHost_;                           // PoleGrids värd för Stolptabell före
+    std::unique_ptr<PoleHost> afterHost_;                            // PoleGrids värd för Stolptabell efter
+    std::unique_ptr<kalkyl::polegrid::PoleGrid> beforeGrid_;         // Stolptabell före i stolpGrid
+    std::unique_ptr<kalkyl::polegrid::PoleGrid> afterGrid_;          // Stolptabell efter i efterGrid
+    kalkyl::projectdb::AutoSettings autoBefore_;                     // automatiskt läge och sträckor i före
+    kalkyl::projectdb::AutoSettings autoAfter_;                      // automatiskt läge och sträckor i efter
+    AutoPanel beforePanel_;                                          // panelen Automatiskt läge i före
+    AutoPanel afterPanel_;                                           // panelen Automatiskt läge i efter
     int gridStatusPanel_ = -1;                                       // statusradens panel för tabellens meddelanden
-    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);     // spärr för postade anrop
+    glaze::FileDialog importFileDlg_{glaze::FileDialogMode::Open};   // filväljaren för Importera stolptabell…
     glaze::threads::Worker saveWorker_;                              // sist, så att den rivs först
 };

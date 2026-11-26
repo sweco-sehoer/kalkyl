@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <condition_variable>
 #include <filesystem>
 #include <memory>
@@ -269,6 +270,52 @@ core::Result<void> flushFile(const std::string& path)
     if (!ok)
         return pathError(code, path);
     return {};
+}
+
+// Läser hela filen med delad åtkomst, så att en fil som Excel har öppen går att läsa. Storleken
+// kontrolleras mot maxBytes före läsningen, och en fil som växer under läsningen ger också Invalid.
+core::Result<std::string> readFileShared(const std::string& path, std::uint64_t maxBytes)
+{
+    HANDLE h = CreateFileW(toWide(path).c_str(), GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        return pathError(GetLastError(), path);
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(h, &size)) {
+        const DWORD code = GetLastError();
+        CloseHandle(h);
+        return pathError(code, path);
+    }
+    auto tooBig = [&] {
+        core::Error e;
+        e.code = core::ErrorCode::Invalid;
+        e.message = "Filen är för stor:" + std::string("\n") + path;
+        e.detail = "Filen är större än " + std::to_string(maxBytes) + " byte.";
+        return e;
+    };
+    if (static_cast<std::uint64_t>(size.QuadPart) > maxBytes) {
+        CloseHandle(h);
+        return tooBig();
+    }
+    std::string data;
+    data.resize(static_cast<size_t>(size.QuadPart));
+    size_t done = 0;
+    while (done < data.size()) {
+        const DWORD want = static_cast<DWORD>(std::min<size_t>(data.size() - done, 16u * 1024 * 1024));
+        DWORD got = 0;
+        if (!ReadFile(h, data.data() + done, want, &got, nullptr)) {
+            const DWORD code = GetLastError();
+            CloseHandle(h);
+            return pathError(code, path);
+        }
+        if (got == 0)
+            break;
+        done += got;
+    }
+    CloseHandle(h);
+    data.resize(done);
+    return data;
 }
 
 // Byter namn utan att ersätta. Finns målet blir felet AlreadyExists.

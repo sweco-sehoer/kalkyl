@@ -23,6 +23,14 @@ inline constexpr std::uint32_t kApplicationId = 0x4B4C4B53;   // "KLKS"
 inline constexpr int kAutosaveChoices[] = {0, 1, 5, 10, 15, 30};
 inline constexpr int kDefaultAutosaveMinutes = 5;
 
+// En rubrik som användaren valt själv för ett fält vid importen av en stolptabell: fältet (0-7,
+// poletable-kolumnen) och den normaliserade rubriken (poleimport::SourceColumn::key).
+struct LearnedHeader {
+    int field = 0;
+    std::string key;
+    bool operator==(const LearnedHeader&) const = default;
+};
+
 // Systemdatabasens förvalda plats: system.db i platform::kalkylDataDir().
 std::string defaultPath();
 
@@ -50,6 +58,17 @@ public:
     int autosaveMinutes();
     // Fel: Invalid (inte ett av kAutosaveChoices), Sql.
     core::Result<void> setAutosaveMinutes(int minutes);
+
+    // Mappen där Importera stolptabell… öppnar filväljaren, "" om inget är sparat. Nyckeln last_import_folder.
+    std::string lastImportFolder();
+    core::Result<void> setLastImportFolder(const std::string& folder);
+    // De inlärda rubrikerna, senast först. Tom lista vid fel eller när inget är sparat.
+    // Nyckeln pole_import_learned: en rad per rubrik, fältet och rubriken skilda med en tabb.
+    std::vector<LearnedHeader> learnedHeaders();
+    // Lägger rubriken först för fältet. Finns den redan flyttas den först, och fler än tio per fält
+    // tas bort från slutet. Fel: Invalid (fältet utanför 0-7, eller en tom rubrik eller en rubrik med
+    // tabb eller radbrytning), Sql.
+    core::Result<void> learnHeader(int field, const std::string& key);
 
     core::Result<std::vector<RecentProject>> recentProjects();   // senast först, högst kMaxRecent
     core::Result<void> touchRecentProject(const std::string& path, const std::string& name);

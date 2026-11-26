@@ -7,7 +7,7 @@ Bygget genererar ingenting här. setup.exe hamnar i `build-release/installer/` o
 |---|---|
 | `CMakeLists.txt` | Målet `installer` (makensis). Ingår inte i ALL och finns bara i Release och när makensis hittas |
 | `kalkyl.nsi` | NSIS-skriptet (MUI2, svenska): sidor, installation, uppgradering och flytt, avinstallation |
-| `licens.txt` | Licenstexten på licenssidan. UTF-8 med BOM och CRLF |
+| `licens.txt` | Licenstexten på licenssidan, med licenserna för programvara från tredje part (miniz, MIT) sist. UTF-8 med BOM och CRLF |
 
 ## Bygga
 

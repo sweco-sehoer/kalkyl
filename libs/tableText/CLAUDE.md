@@ -12,6 +12,7 @@ namnrymden `kalkyl::tabletext` och includes skrivs `"tableText/table_text.h"`. D
 ## Regler
 
 - **Rena funktioner:** inget tillstånd, ingen I/O.
+- **Tabb eller radbrytning mitt i** (en Excelcell med två rader, "256", radbrytning, "256") är aldrig ett tal: `parseDecimal` och `normalizeDecimal` vägrar den. I ändarna trimmas de.
 - **Talform:** `parseDecimal` läser komma och punkt (inte båda). `formatDecimal` skriver med komma för visning och urklipp
   och med punkt för DataGrids kanoniska celltext.
 - **Kanonisk decimaltext:** `normalizeDecimal` gör inmatad text till punkt som decimaltecken, utan tusentalsavgränsare och med exakt de decimaler som skrevs.

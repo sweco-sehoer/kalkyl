@@ -567,6 +567,108 @@ void testAutosaveSetting(const std::string& dir)
         CHECK(mem.value().autosaveMinutes() == 5);
 }
 
+// Importmappen är en egen nyckel, skild från last_folder, och består över omöppning.
+void testLastImportFolder(const std::string& dir)
+{
+    const std::string path = join(dir, "importmapp.db");
+    {
+        auto sys = systemdb::SystemDb::open(path);
+        CHECK(sys.ok());
+        if (!sys.ok())
+            return;
+        CHECK(sys.value().lastImportFolder().empty());
+        CHECK(sys.value().setLastFolder(join(dir, "Projekt åäö")).ok());
+        CHECK(sys.value().lastImportFolder().empty());
+        CHECK(sys.value().setLastImportFolder(join(dir, "Hämtade filer åäö")).ok());
+        CHECK(sys.value().lastImportFolder() == join(dir, "Hämtade filer åäö"));
+        CHECK(sys.value().lastFolder() == join(dir, "Projekt åäö"));
+    }
+    auto again = systemdb::SystemDb::open(path);
+    CHECK(again.ok());
+    if (!again.ok())
+        return;
+    CHECK(again.value().lastImportFolder() == join(dir, "Hämtade filer åäö"));
+    CHECK(again.value().lastFolder() == join(dir, "Projekt åäö"));
+}
+
+// De inlärda rubrikerna: ordningen med senast först, en dubblett som flyttas först, högst tio
+// per fält, andra fält orörda, ogiltiga värden, omöppning och reserven i minnet.
+void testLearnedHeaders(const std::string& dir)
+{
+    using systemdb::LearnedHeader;
+    const std::string path = join(dir, "inlarda.db");
+    {
+        auto sys = systemdb::SystemDb::open(path);
+        CHECK(sys.ok());
+        if (!sys.ok())
+            return;
+        systemdb::SystemDb& s = sys.value();
+        CHECK(s.learnedHeaders().empty());
+
+        CHECK(s.learnHeader(0, "stolpbeteckning").ok());
+        CHECK(s.learnHeader(5, "profil | ah").ok());
+        CHECK(s.learnHeader(0, "stolpe nummer").ok());
+        CHECK((s.learnedHeaders() == std::vector<LearnedHeader>{{0, "stolpe nummer"}, {5, "profil | ah"},
+                                                                {0, "stolpbeteckning"}}));
+
+        // En dubblett flyttas först utan att läggas till en gång till.
+        CHECK(s.learnHeader(0, "stolpbeteckning").ok());
+        CHECK((s.learnedHeaders() == std::vector<LearnedHeader>{{0, "stolpbeteckning"}, {0, "stolpe nummer"},
+                                                                {5, "profil | ah"}}));
+        CHECK(s.learnHeader(0, "stolpbeteckning").ok());
+        CHECK(s.learnedHeaders().size() == 3);
+
+        // Den elfte rubriken för fältet tar bort den äldsta, och andra fält påverkas inte.
+        for (int i = 1; i <= 10; ++i)
+            CHECK(s.learnHeader(0, "rubrik " + std::to_string(i)).ok());
+        int fieldZero = 0;
+        bool oldest = false;
+        for (const LearnedHeader& h : s.learnedHeaders()) {
+            if (h.field == 0)
+                ++fieldZero;
+            if (h.field == 0 && (h.key == "stolpe nummer" || h.key == "stolpbeteckning"))
+                oldest = true;
+        }
+        CHECK(fieldZero == 10);
+        CHECK(!oldest);
+        const std::vector<LearnedHeader> list = s.learnedHeaders();
+        CHECK((!list.empty() && list.front() == LearnedHeader{0, "rubrik 10"}));
+        CHECK(list.size() == 11);
+        CHECK((!list.empty() && list.back() == LearnedHeader{5, "profil | ah"}));
+
+        // Ogiltiga värden ger Invalid och ändrar inget.
+        const std::vector<LearnedHeader> before = s.learnedHeaders();
+        const auto isInvalid = [&](int field, const std::string& key) {
+            auto r = s.learnHeader(field, key);
+            CHECK(!r.ok() && r.error().code == core::ErrorCode::Invalid);
+        };
+        isInvalid(8, "rubrik");
+        isInvalid(-1, "rubrik");
+        isInvalid(1, "");
+        isInvalid(1, "två" + std::string(1, char{9}) + "delar");
+        isInvalid(1, "två" + std::string(1, char{10}) + "rader");
+        CHECK(s.learnedHeaders() == before);
+    }
+    {
+        auto sys = systemdb::SystemDb::open(path);
+        CHECK(sys.ok());
+        if (sys.ok()) {
+            const std::vector<LearnedHeader> list = sys.value().learnedHeaders();
+            CHECK(list.size() == 11);
+            CHECK((!list.empty() && list.front() == LearnedHeader{0, "rubrik 10"}));
+        }
+    }
+    auto mem = systemdb::SystemDb::openInMemory("test");
+    CHECK(mem.ok());
+    if (mem.ok()) {
+        CHECK(mem.value().learnedHeaders().empty());
+        CHECK(mem.value().learnHeader(2, "koordinat n").ok());
+        CHECK((mem.value().learnedHeaders() == std::vector<LearnedHeader>{{2, "koordinat n"}}));
+        CHECK(mem.value().setLastImportFolder("mapp").ok());
+        CHECK(mem.value().lastImportFolder() == "mapp");
+    }
+}
+
 // En databas med det gamla schemat (utan linregistret) flyttas undan som skadad och ersätts
 // av en ny med startdatan. Läget går tillbaka till System.
 void testOldSchemaMovedAside(const std::string& dir)
@@ -631,6 +733,8 @@ int main()
     testConductorEdit(dir);
     testConductorRemoveRestore(dir);
     testAutosaveSetting(dir);
+    testLastImportFolder(dir);
+    testLearnedHeaders(dir);
     testOldSchemaMovedAside(dir);
 
     fs::remove_all(platform::pathFromUtf8(dir), ec);

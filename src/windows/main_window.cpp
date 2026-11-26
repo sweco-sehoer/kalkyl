@@ -4,12 +4,14 @@
 #include "conductor_dialog.h"
 #include "line_calc_dialog.h"
 #include "normal_span_dialog.h"
+#include "pole_import_dialog.h"
 
 #include "appearance/appearance.h"
 #include "lineCalc/line_calc.h"
 #include "lineCalc/load_cases.h"
 #include "tableText/table_text.h"
 #include "platform/files.h"
+#include "platform/system.h"
 #include "version/version.h"
 
 #include <algorithm>
@@ -51,29 +53,6 @@ constexpr int kLcUtilColumn = 8;
 
 // Radbrytning i texter. Skrivs som tecken så att ingen escape-sekvens behövs i källan.
 const std::string kNl(1, char{10});
-
-// Stolptabellens radera-kolumn: kolumnen efter de åtta datakolumnerna.
-constexpr int kPoleDeleteColumn = kalkyl::poletable::kColumnCount;
-
-// Den tomma raden sist i stolptabellen, där en ny stolpe skrivs: tomma celler i alla nio kolumner.
-// Samma rad när tabellen byggs om och när en ny stolpe lagts till.
-glaze::DataGrid::Row blankPoleRow()
-{
-    glaze::DataGrid::Row blank;
-    blank.cells.assign(kPoleDeleteColumn + 1, std::string());
-    return blank;
-}
-
-// Postar ett anrop till UI-tråden som hoppas över om fönstret hunnit försvinna. MainWindow är en
-// lokal i main-slingan, så en postad lambda får inte nå ett rivet fönster.
-void postIfAlive(const std::shared_ptr<bool>& alive, std::function<void()> fn)
-{
-    std::weak_ptr<bool> weak = alive;
-    glaze::app().post([weak, fn = std::move(fn)] {
-        if (weak.lock())
-            fn();
-    });
-}
 
 // Gruppernas bakgrundsfärger i Dokumentation, halvgenomskinliga så att de fungerar i ljust och mörkt läge.
 const gfx::Color kBlue{60, 130, 210, 56};
@@ -231,12 +210,15 @@ std::string poleText(const std::string& pole)
     return pole.empty() ? std::string("–") : pole;
 }
 
-// Första och sista stolpens Stpnr, ur resultatet när det finns och annars ur stolparna.
+// Första och sista stolpens Stpnr, ur resultatet när det finns. Saknas resultatet för en
+// automatisk beräkning är det sträckans Stolpplatser, annars stolparnas.
 std::pair<std::string, std::string> polesOf(const kalkyl::projectdb::NormalSpan& ns,
                                             const kalkyl::ancalc::SpanCalculation& calc)
 {
     if (calc.result)
         return {calc.result->fromPole, calc.result->toPole};
+    if (ns.automatic)
+        return {ns.automatic->range.fromPole, ns.automatic->range.toPole};
     std::string from, to;
     for (const auto& p : ns.poles) {
         if (p.pole.empty())
@@ -268,10 +250,38 @@ std::string firstError(const kalkyl::ancalc::SpanCalculation& calc)
     return {};
 }
 
-// Summan av antalen avvikelser i kontrollerna 1-5.
-int deviationCount(const kalkyl::ancalc::SpanResult& r)
+// Det första felet i en automatisk beräkning: "ST0105: Spannlängd saknas.", eller "rad 3: …"
+// när stolpen saknar Stpnr. Ett fel utan stolpe (sträckans eget) visas som det är.
+std::string autoErrorText(const kalkyl::projectdb::NormalSpan& ns, const kalkyl::ancalc::SpanCalculation& calc)
 {
-    return r.tooLongCount + r.tooShortCount + r.adjacentCount + r.localLowCount + r.localHighCount;
+    for (const auto& issue : calc.issues) {
+        if (issue.kind != kalkyl::ancalc::IssueKind::Error)
+            continue;
+        if (issue.poleIndex < 0)
+            return issue.message;
+        const auto index = static_cast<std::size_t>(issue.poleIndex);
+        if (index < ns.poles.size() && !ns.poles[index].pole.empty())
+            return ns.poles[index].pole + ": " + issue.message;
+        return "rad " + std::to_string(issue.poleIndex + 1) + ": " + issue.message;
+    }
+    return {};
+}
+
+// Radens ton: färgen med alfa 64 på jämna och 52 på udda rader, så att raderna är lätta att följa.
+// Används av Dokumentation och listorna i flikarna Normalspann och Linberäkning.
+gfx::Color rowTone(gfx::Color color, std::size_t index)
+{
+    color.a = (index % 2 == 0) ? 64 : 52;
+    return color;
+}
+
+// Tonen på en rad i flikarna Normalspann och Linberäkning: gul för en vanlig beräkning, och för en
+// automatisk skedets färg, lila för före och rosa för efter.
+gfx::Color calcTone(const std::optional<kalkyl::projectdb::AutoOrigin>& automatic, std::size_t index)
+{
+    if (!automatic)
+        return rowTone(kAmber, index);
+    return rowTone(automatic->stage == kalkyl::projectdb::Stage::Before ? kPurple : kRose, index);
 }
 
 // Upplysningens text, med lastfallet först när den gäller ett lastfall ("Lastfall 4: ...").
@@ -454,32 +464,39 @@ void MainWindow::onLoad(glaze::Widget*, glaze::EventArgs&)
 
     loadProjectData();
     rebuildByggPm();
-    refreshNormalSpans();
-    refreshLineCalcs();
-    loadPoleTable();
-    {
-        // Excel-markeringen i stolptabellen: kolumn 0-7 tar emot inklistring, och nya rader får
-        // läggas till under tabellen.
-        namespace pt = kalkyl::poletable;
-        kalkyl::sheetgrid::SheetShape shape;
-        shape.rowCount = stolpGrid.rowCount();
-        shape.columnCount = pt::kColumnCount;
-        shape.firstColumn = 0;
-        shape.isInput = [](int, int column) { return column >= 0 && column < pt::kColumnCount; };
-        shape.accept = [](int, int column, const std::string& field) { return pt::acceptField(column, field); };
-        shape.columnName = [](int column) { return pt::columnName(column); };
-        shape.growRows = true;
-        shape.headerTakesRow = false;
-        poleHost_ = std::make_unique<PoleSheetHost>(*this);
-        poleSheet_ = std::make_unique<kalkyl::sheetgrid::SheetGrid>(stolpGrid, std::move(shape), *poleHost_);
-    }
+
+    // Stolptabellerna, med PoleGrid och en värd för varje, och pekarna till panelerna.
+    beforeHost_ = std::make_unique<PoleHost>(*this, Stage::Before);
+    afterHost_ = std::make_unique<PoleHost>(*this, Stage::After);
+    beforeGrid_ = std::make_unique<kalkyl::polegrid::PoleGrid>(
+        *this, stolpGrid, *beforeHost_, std::string(kalkyl::projectdb::poleTableName(Stage::Before)));
+    afterGrid_ = std::make_unique<kalkyl::polegrid::PoleGrid>(
+        *this, efterGrid, *afterHost_, std::string(kalkyl::projectdb::poleTableName(Stage::After)));
+    beforePanel_.check = &stolpAutoChk;
+    beforePanel_.names = {&stolpFasLbl, &stolpToppVLbl, &stolpToppHLbl};
+    beforePanel_.drops = {&stolpFasFran, &stolpFasTill, &stolpToppVFran, &stolpToppVTill, &stolpToppHFran, &stolpToppHTill};
+    beforePanel_.status = {&stolpFasStatus, &stolpToppVStatus, &stolpToppHStatus};
+    afterPanel_.check = &efterAutoChk;
+    afterPanel_.names = {&efterFasLbl, &efterToppVLbl, &efterToppHLbl};
+    afterPanel_.drops = {&efterFasFran, &efterFasTill, &efterToppVFran, &efterToppVTill, &efterToppHFran, &efterToppHTill};
+    afterPanel_.status = {&efterFasStatus, &efterToppVStatus, &efterToppHStatus};
+
+    // Skrivskyddat: rutorna, rullistorna och knapparna släcks, och tabellerna låses.
     if (readOnly()) {
-        for (int c = 0; c < kalkyl::poletable::kColumnCount; ++c)
-            stolpGrid.setColumnEditor(c, {.editor = glaze::DataGrid::Editor::Text, .readOnly = true});
-        stolpGrid.setColumnEditor(kPoleDeleteColumn, {glaze::DataGrid::Editor::None});
-        poleSheet_->setReadOnly(true);
+        beforeGrid_->setReadOnly(true);
+        afterGrid_->setReadOnly(true);
+        for (AutoPanel* panel : {&beforePanel_, &afterPanel_}) {
+            panel->check->disable();
+            for (glaze::Dropdown* drop : panel->drops)
+                drop->disable();
+        }
+        stolpImportBtn.disable();
+        efterKopieraBtn.disable();
+        efterSomForeBtn.disable();
     }
-    fillPoleGrid();
+
+    loadPoleTables();
+    refreshAutomatic();
     updateTitle();
     restartAutosave();
     if (defaults && project_->isModified())
@@ -510,288 +527,600 @@ void MainWindow::applyNewProjectDefaults()
     }
 }
 
-// Läser stolptabellen ur projektet till poleRows_ och poleSaved_. Ett fel loggas och ger en
-// meddelanderuta, och tabellen blir tom.
-void MainWindow::loadPoleTable()
+// Läser båda stolptabellerna och inställningarna för automatiskt läge ur projektet. Ett fel
+// loggas och ger en meddelanderuta, och tabellen blir tom med automatiskt läge av.
+void MainWindow::loadPoleTables()
 {
-    auto poles = kalkyl::projectdb::polesBefore(*project_);
-    if (!poles) {
-        gfx::log("Stolptabellen kunde inte läsas: %s", poles.error().detail.c_str());
-        glaze::messageBox(*this, "Stolptabellen kunde inte läsas." + kNl + poles.error().message, "Kalkyl",
-                          glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Error);
-        poleRows_.clear();
-        poleSaved_.clear();
-        return;
-    }
-    poleRows_ = std::move(poles.value());
-    poleSaved_ = kalkyl::poletable::rowsToSave(poleRows_);
-}
-
-// Bygger om tabellen: en rad per stolpe ur poleRows_ och den tomma raden sist. Raderna får
-// ton och knapp, och den aktuella cellen sätts tillbaka klampad, eftersom setRows nollar den.
-void MainWindow::fillPoleGrid()
-{
-    namespace pt = kalkyl::poletable;
-    const int currentRow = stolpGrid.currentRow();
-    const int currentColumn = stolpGrid.currentColumn();
-
-    std::vector<glaze::DataGrid::Row> rows;
-    rows.reserve(poleRows_.size() + 1);
-    for (const auto& pole : poleRows_) {
-        glaze::DataGrid::Row row;
-        row.cells.resize(kPoleDeleteColumn + 1);
-        for (int c = 0; c < pt::kColumnCount; ++c)
-            row.cells[static_cast<std::size_t>(c)] = pt::displayText(pole, c);
-        rows.push_back(std::move(row));
-    }
-    rows.push_back(blankPoleRow());
-    stolpGrid.setRows(std::move(rows));
-
-    const int total = stolpGrid.rowCount();
-    for (int r = 0; r < total; ++r)
-        decoratePoleRow(r);
-    if (currentRow >= 0)
-        stolpGrid.setCurrentCell(std::clamp(currentRow, 0, total - 1), std::clamp(currentColumn, 0, kPoleDeleteColumn));
-    if (poleSheet_)
-        poleSheet_->rowsChanged();
-}
-
-// Raden får sin ton i radera-kolumnen. En datarad i ett skrivbart projekt får dessutom en knapp
-// med papperskorg. Den tomma raden sist och skrivskyddat läge får en låst cell utan bild.
-void MainWindow::decoratePoleRow(int row)
-{
-    stolpGrid.setCellColor(row, kPoleDeleteColumn, poleTone(row), std::nullopt);
-    if (row < static_cast<int>(poleRows_.size()) && !readOnly()) {
-        stolpGrid.clearCellEditor(row, kPoleDeleteColumn);  // den förra tomma raden var låst
-        stolpGrid.setCellImage(row, kPoleDeleteColumn, glaze::stockIcon(glaze::StockIcon::Trash));
-        stolpGrid.setCellToolTip(row, kPoleDeleteColumn, "Radera raden");
-    } else {
-        stolpGrid.setCellEditor(row, kPoleDeleteColumn, {glaze::DataGrid::Editor::None});
-    }
-}
-
-// Samma gula ton och växling som temperaturraderna i Dokumentation: varannan rad en aning
-// mörkare, så att raderna är lätta att följa.
-gfx::Color MainWindow::poleTone(int row) const
-{
-    gfx::Color tone = kAmber;
-    tone.a = (row % 2 == 0) ? 64 : 52;
-    return tone;
-}
-
-// En cell i stolptabellen sparades. Ett ogiltigt tal i en talkolumn ger ingen ruta, cellen får
-// bara tillbaka sitt förra värde. Ett giltigt värde skrivs om i visningsform och tabellen sparas.
-// I den tomma raden sist läggs en ny stolpe till, och en ny tom rad kommer efter den.
-void MainWindow::stolpGridCommitted(glaze::Widget*, glaze::CellChangeArgs& e)
-{
-    namespace pt = kalkyl::poletable;
-    const int count = static_cast<int>(poleRows_.size());
-    if (readOnly() || e.row < 0 || e.row > count || e.column < 0 || e.column >= pt::kColumnCount)
-        return;
-    const int r = e.row;
-    const int c = e.column;
-    const auto accepted = pt::acceptField(c, stolpGrid.cell(r, c));
-
-    // Cellens förra visningstext, eller tom text i den tomma raden.
-    const auto shown = [this, r, c, count]() {
-        return r < count ? kalkyl::poletable::displayText(poleRows_[static_cast<std::size_t>(r)], c) : std::string();
-    };
-    if (!accepted) {
-        stolpGrid.setCell(r, c, shown());
-        return;
-    }
-
-    if (r == count) {
-        // Den tomma raden sist: tom text lägger inte till något.
-        if (accepted->empty()) {
-            stolpGrid.setCell(r, c, std::string());
-            return;
+    for (const Stage stage : {Stage::Before, Stage::After}) {
+        const std::string table(kalkyl::projectdb::poleTableName(stage));
+        auto rows = kalkyl::projectdb::poles(*project_, stage);
+        auto settings = kalkyl::projectdb::autoSettings(*project_, stage);
+        if (!rows || !settings) {
+            const auto& error = !rows ? rows.error() : settings.error();
+            gfx::log("%s kunde inte läsas: %s", table.c_str(), error.detail.c_str());
+            glaze::messageBox(*this, table + " kunde inte läsas." + kNl + error.message, "Kalkyl",
+                              glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Error);
+            poleGridOf(stage).setRows({});
+            settingsOf(stage) = {};
+            continue;
         }
-        poleRows_.emplace_back();
-        pt::field(poleRows_.back(), c) = *accepted;
-        stolpGrid.setCell(r, c, pt::displayText(poleRows_.back(), c));
-        stolpGrid.addRow(blankPoleRow().cells);
-        decoratePoleRow(r);
-        decoratePoleRow(r + 1);
-        poleSheet_->rowsChanged();
-        savePoleTable();
-        return;
+        poleGridOf(stage).setRows(std::move(rows.value()));
+        settingsOf(stage) = settings.value();
     }
-
-    std::string& field = pt::field(poleRows_[static_cast<std::size_t>(r)], c);
-    const bool changed = field != *accepted;
-    field = *accepted;
-    stolpGrid.setCell(r, c, shown());
-    if (changed)
-        savePoleTable();
 }
 
-// Radera-knappen på en rad. Frågan postas, så att tabellen inte ändras mitt i sin egen händelse.
-void MainWindow::stolpGridCellClicked(glaze::Widget*, glaze::CellClickArgs& e)
+// Sparar hela tabellen för skedet i projektets arbetskopia. Vid fel loggas det och en ruta
+// visas. Svarar om det lyckades.
+bool MainWindow::savePoles(Stage stage, const std::vector<kalkyl::poletable::PoleRow>& rows)
 {
-    if (e.column != kPoleDeleteColumn || readOnly() || e.row < 0 || e.row >= static_cast<int>(poleRows_.size()))
-        return;
-    const int row = e.row;
-    postIfAlive(alive_, [this, row] { removePoleRowsAsked(row, row); });
-}
-
-// Tangenterna i tabellen går till Excel-markeringen.
-void MainWindow::stolpGridKeyDown(glaze::Widget*, glaze::KeyArgs& e)
-{
-    if (poleSheet_)
-        poleSheet_->keyDown(e);
-}
-
-// Musen i tabellen går till Excel-markeringen, som synkar markeringen efter klicket.
-void MainWindow::stolpGridMouseUp(glaze::Widget*, glaze::MouseArgs& e)
-{
-    if (poleSheet_)
-        poleSheet_->mouseUp(e);
-}
-
-// Högerklicket i tabellen visar Excel-markeringens snabbmeny.
-void MainWindow::stolpGridContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e)
-{
-    if (poleSheet_)
-        poleSheet_->contextMenu(e);
-}
-
-// Adaptern till SheetGrid: texten en cell kopieras som, med decimalkomma och utan gruppering.
-// Den tomma raden sist ger tom text.
-std::string MainWindow::PoleSheetHost::copyText(int row, int column) const
-{
-    if (row < 0 || row >= static_cast<int>(window_.poleRows_.size()))
-        return std::string();
-    return kalkyl::poletable::copyText(window_.poleRows_[static_cast<std::size_t>(row)], column);
-}
-
-// Adaptern till SheetGrid: cellens färg utan markering är radtonen.
-std::optional<gfx::Color> MainWindow::PoleSheetHost::baseColor(int row, int) const
-{
-    return window_.poleTone(row);
-}
-
-// Adaptern till SheetGrid: inklistrade och raderade celler skrivs i modellen.
-void MainWindow::PoleSheetHost::applyEdits(const std::vector<kalkyl::sheetgrid::CellEdit>& edits)
-{
-    window_.applyPoleEdits(edits);
-}
-
-// Adaptern till SheetGrid: snabbmenyns egna poster, Infoga rad ovanför och Radera rader….
-void MainWindow::PoleSheetHost::addMenuItems(glaze::Menu& menu, const kalkyl::sheetgrid::CellRect& selection)
-{
-    const int count = static_cast<int>(window_.poleRows_.size());
-    const bool writable = !window_.readOnly();
-    const int row0 = selection.row0;
-    const int row1 = std::min(selection.row1, count - 1);
-    MainWindow* window = &window_;
-
-    glaze::MenuItem& insertItem = menu.addItem("Infoga rad ovanför");
-    insertItem.enabled = writable && row0 >= 0 && row0 < count;
-    insertItem.onClick = [window, row0] { window->insertPoleRowAbove(row0); };
-
-    glaze::MenuItem& removeItem = menu.addItem("Radera rader…");
-    removeItem.enabled = writable && row0 <= row1 && row0 < count;
-    removeItem.onClick = [window, row0, row1] {
-        postIfAlive(window->alive_, [window, row0, row1] { window->removePoleRowsAsked(row0, row1); });
-    };
-}
-
-// Adaptern till SheetGrid: en kort text i statusraden.
-void MainWindow::PoleSheetHost::showStatus(const std::string& text)
-{
-    window_.setPoleStatus(text);
-}
-
-// Skriver ändringarna i poleRows_: nya rader läggs till, helt tomma rader sist tas bort.
-// Tabellen byggs om och sparas som EN ändring.
-void MainWindow::applyPoleEdits(const std::vector<kalkyl::sheetgrid::CellEdit>& edits)
-{
-    if (readOnly())
-        return;
-    std::vector<kalkyl::poletable::Edit> converted;
-    converted.reserve(edits.size());
-    for (const auto& edit : edits)
-        converted.push_back({edit.row, edit.column, edit.text});
-    kalkyl::poletable::applyEdits(poleRows_, converted);
-    kalkyl::poletable::trimTrailingEmptyRows(poleRows_);
-    fillPoleGrid();
-    savePoleTable();
-}
-
-// Skriver hela stolptabellen i arbetskopian när den skiljer sig från det senast sparade.
-// Vid fel loggas det, en ruta visas och tabellen läses om (postat, så att tabellen inte byggs om
-// mitt i sin egen händelse). Svarar om det lyckades.
-bool MainWindow::savePoleTable()
-{
-    const auto toSave = kalkyl::poletable::rowsToSave(poleRows_);
-    if (toSave == poleSaved_)
-        return true;
-    const auto saved = kalkyl::projectdb::setPolesBefore(*project_, poleRows_);
+    const auto saved = kalkyl::projectdb::setPoles(*project_, stage, rows);
     if (!saved) {
-        gfx::log("Stolptabellen kunde inte sparas: %s", saved.error().detail.c_str());
-        glaze::messageBox(*this, "Stolptabellen kunde inte sparas." + kNl + saved.error().message, "Kalkyl",
+        const std::string table(kalkyl::projectdb::poleTableName(stage));
+        gfx::log("%s kunde inte sparas: %s", table.c_str(), saved.error().detail.c_str());
+        glaze::messageBox(*this, table + " kunde inte sparas." + kNl + saved.error().message, "Kalkyl",
                           glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Error);
-        postIfAlive(alive_, [this] {
-            loadPoleTable();
-            fillPoleGrid();
-        });
         return false;
     }
-    poleSaved_ = toSave;
     updateTitle();
     return true;
 }
 
-// Infogar en tom rad vid row, bygger om tabellen, markerar den nya raden och sparar. Tomma rader
-// mitt i tabellen sparas.
-void MainWindow::insertPoleRowAbove(int row)
+// Tabellens rader som de står i projektet. Vid fel loggas det och listan är tom.
+std::vector<kalkyl::poletable::PoleRow> MainWindow::reloadPoles(Stage stage)
 {
-    if (readOnly() || row < 0 || row >= static_cast<int>(poleRows_.size()))
-        return;
-    commitEdits();
-    poleRows_.insert(poleRows_.begin() + row, kalkyl::poletable::PoleRow{});
-    fillPoleGrid();
-    poleSheet_->select({row, 0}, {row, 0});
-    savePoleTable();
+    auto rows = kalkyl::projectdb::poles(*project_, stage);
+    if (!rows) {
+        gfx::log("%s kunde inte läsas: %s", std::string(kalkyl::projectdb::poleTableName(stage)).c_str(),
+                 rows.error().detail.c_str());
+        return {};
+    }
+    return std::move(rows.value());
 }
 
-// Frågar "Radera stolpplats ST0381?" med Ja förvalt. Vid Ja tas raderna first till last bort,
-// markeringen hamnar på raden som tog deras plats och tabellen sparas.
-void MainWindow::removePoleRowsAsked(int first, int last)
+// Stolptabellernas händelser går vidare till PoleGrid, som äger redigeringen, Excel-markeringen,
+// papperskorgen och snabbmenyn. Stolptabell före först: en cell sparades.
+void MainWindow::stolpGridCommitted(glaze::Widget*, glaze::CellChangeArgs& e)
 {
-    if (readOnly())
-        return;
-    commitEdits();
-    const int count = static_cast<int>(poleRows_.size());
-    first = std::max(first, 0);
-    last = std::min(last, count - 1);
-    if (first > last)
-        return;
+    if (beforeGrid_)
+        beforeGrid_->committed(e);
+}
 
-    const std::string& firstPole = poleRows_[static_cast<std::size_t>(first)].pole;
-    const std::string& lastPole = poleRows_[static_cast<std::size_t>(last)].pole;
-    const int n = last - first + 1;
-    std::string text;
-    if (n == 1) {
-        text = firstPole.empty() ? "Radera rad " + std::to_string(first + 1) + "?"
-                                 : "Radera stolpplats " + firstPole + "?";
-    } else if (!firstPole.empty() && !lastPole.empty()) {
-        text = "Radera stolpplats " + firstPole + " – " + lastPole + " (" + std::to_string(n) + " rader)?";
-    } else {
-        text = "Radera rad " + std::to_string(first + 1) + " – " + std::to_string(last + 1) + " (" +
-               std::to_string(n) + " rader)?";
+// Stolptabell före: ett klick i en cell, till exempel på papperskorgen, går till PoleGrid.
+// Före onLoad finns ingen PoleGrid, och då händer ingenting.
+void MainWindow::stolpGridCellClicked(glaze::Widget*, glaze::CellClickArgs& e)
+{
+    if (beforeGrid_)
+        beforeGrid_->cellClicked(e);
+}
+
+// Stolptabell före: tangenterna för Excel-markeringen och urklippet (Shift, Ctrl+C, X, V, A och
+// Delete) går till PoleGrid.
+void MainWindow::stolpGridKeyDown(glaze::Widget*, glaze::KeyArgs& e)
+{
+    if (beforeGrid_)
+        beforeGrid_->keyDown(e);
+}
+
+// Stolptabell före: Shift+klick utökar markeringen i PoleGrid.
+// Musknappen släpps efter klicket, så att tabellen redan har flyttat den aktuella cellen.
+void MainWindow::stolpGridMouseUp(glaze::Widget*, glaze::MouseArgs& e)
+{
+    if (beforeGrid_)
+        beforeGrid_->mouseUp(e);
+}
+
+// Stolptabell före: snabbmenyn med urklipp, Infoga rad ovanför, Radera rader… och undermenyn
+// Sträcka byggs av PoleGrid och värden.
+void MainWindow::stolpGridContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e)
+{
+    if (beforeGrid_)
+        beforeGrid_->contextMenu(e);
+}
+
+// Stolptabell efter: samma händelser som i före, till sin egen PoleGrid. En cell sparades.
+// Före onLoad finns ingen PoleGrid, och då händer ingenting.
+void MainWindow::efterGridCommitted(glaze::Widget*, glaze::CellChangeArgs& e)
+{
+    if (afterGrid_)
+        afterGrid_->committed(e);
+}
+
+// Stolptabell efter: ett klick i en cell, till exempel på papperskorgen, går till PoleGrid.
+// Före onLoad finns ingen PoleGrid, och då händer ingenting.
+void MainWindow::efterGridCellClicked(glaze::Widget*, glaze::CellClickArgs& e)
+{
+    if (afterGrid_)
+        afterGrid_->cellClicked(e);
+}
+
+// Stolptabell efter: tangenterna för Excel-markeringen och urklippet (Shift, Ctrl+C, X, V, A och
+// Delete) går till PoleGrid.
+void MainWindow::efterGridKeyDown(glaze::Widget*, glaze::KeyArgs& e)
+{
+    if (afterGrid_)
+        afterGrid_->keyDown(e);
+}
+
+// Stolptabell efter: Shift+klick utökar markeringen i PoleGrid.
+// Musknappen släpps efter klicket, så att tabellen redan har flyttat den aktuella cellen.
+void MainWindow::efterGridMouseUp(glaze::Widget*, glaze::MouseArgs& e)
+{
+    if (afterGrid_)
+        afterGrid_->mouseUp(e);
+}
+
+// Stolptabell efter: snabbmenyn med urklipp, Infoga rad ovanför, Radera rader… och undermenyn
+// Sträcka byggs av PoleGrid och värden.
+void MainWindow::efterGridContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e)
+{
+    if (afterGrid_)
+        afterGrid_->contextMenu(e);
+}
+
+// Värden till PoleGrid: sparar tabellen i projektet. Ett fel har visats av savePoles, och
+// tabellen läses då om av PoleGrid.
+bool MainWindow::PoleHost::savePoles(const std::vector<kalkyl::poletable::PoleRow>& rows)
+{
+    return window_.savePoles(stage_, rows);
+}
+
+// Värden till PoleGrid: raderna som de står i projektet.
+std::vector<kalkyl::poletable::PoleRow> MainWindow::PoleHost::reloadPoles()
+{
+    return window_.reloadPoles(stage_);
+}
+
+// Värden till PoleGrid: tabellen är sparad med en ändring, så beräkningarna räknas om.
+void MainWindow::PoleHost::polesChanged()
+{
+    window_.refreshAutomatic();
+}
+
+// Värden till PoleGrid: en Stolpplats döptes om, så sträckorna följer med.
+void MainWindow::PoleHost::poleRenamed(const std::string& from, const std::string& to)
+{
+    window_.renameInRanges(stage_, from, to);
+}
+
+// Värden till PoleGrid: undermenyn Sträcka sist i snabbmenyn.
+void MainWindow::PoleHost::addMenuItems(glaze::Menu& menu, int row)
+{
+    window_.addRangeMenuItems(stage_, menu, row);
+}
+
+// Värden till PoleGrid: noten om sträckor i frågan Radera.
+std::string MainWindow::PoleHost::removeNote(int first, int last) const
+{
+    return window_.rangeNote(stage_, first, last);
+}
+
+// Värden till PoleGrid: en kort text i statusraden.
+void MainWindow::PoleHost::showStatus(const std::string& text)
+{
+    window_.setPoleStatus(text);
+}
+
+// Tabellen för skedet.
+kalkyl::polegrid::PoleGrid& MainWindow::poleGridOf(Stage stage) const
+{
+    return stage == Stage::Before ? *beforeGrid_ : *afterGrid_;
+}
+
+// Inställningen för skedet.
+kalkyl::projectdb::AutoSettings& MainWindow::settingsOf(Stage stage)
+{
+    return stage == Stage::Before ? autoBefore_ : autoAfter_;
+}
+
+const kalkyl::projectdb::AutoSettings& MainWindow::settingsOf(Stage stage) const
+{
+    return stage == Stage::Before ? autoBefore_ : autoAfter_;
+}
+
+// Panelen Automatiskt läge för skedet.
+MainWindow::AutoPanel& MainWindow::panelOf(Stage stage)
+{
+    return stage == Stage::Before ? beforePanel_ : afterPanel_;
+}
+
+// De linor som är automatiska: faslinan och topplina vänster (Topplinor när topplinorna är
+// samma), och topplina höger när den är en egen lina.
+std::vector<Wire> MainWindow::activeWires() const
+{
+    std::vector<Wire> wires = {Wire::Phase, Wire::TopLeft};
+    if (byggPmSplit_)
+        wires.push_back(Wire::TopRight);
+    return wires;
+}
+
+// Skedets sträckor med linornas ord för de aktiva linorna. Ordet börjar med en liten bokstav och
+// får versal först i en mening (tableMarks).
+std::vector<kalkyl::automode::NamedRange> MainWindow::namedRanges(Stage stage) const
+{
+    std::vector<kalkyl::automode::NamedRange> named;
+    for (const Wire wire : activeWires())
+        named.push_back({kalkyl::projectdb::autoLineWord(wire, !byggPmSplit_),
+                         settingsOf(stage).ranges[static_cast<std::size_t>(wire)]});
+    return named;
+}
+
+// Läser om de automatiska beräkningarna ur projektet och uppdaterar allt som visar dem:
+// Dokumentation och flikarna Normalspann och Linberäkning, panelerna och tabellernas färger.
+void MainWindow::refreshAutomatic()
+{
+    refreshNormalSpans();
+    refreshLineCalcs();
+    updateAutoPanels();
+    updatePoleLooks();
+}
+
+// Fyller panelen Automatiskt läge för båda skedena.
+void MainWindow::updateAutoPanels()
+{
+    fillAutoPanel(Stage::Before);
+    fillAutoPanel(Stage::After);
+}
+
+// Fyller panelen för skedet. Rullistorna byggs bara om när tabellens Stolpplatser ändrats,
+// eftersom en omfyllning stänger en öppen lista. Statustexten visas också när läget är av.
+void MainWindow::fillAutoPanel(Stage stage)
+{
+    AutoPanel& panel = panelOf(stage);
+    const auto& settings = settingsOf(stage);
+    const auto& rows = poleGridOf(stage).rows();
+    const std::string table(kalkyl::projectdb::poleTableName(stage));
+    panel.check->setChecked(settings.enabled);
+
+    // Stolpplatserna i tabellens ordning, en gång var.
+    std::vector<std::string> poles;
+    for (const auto& row : rows) {
+        const std::string pole = kalkyl::tabletext::trimmed(row.pole);
+        if (!pole.empty() && std::find(poles.begin(), poles.end(), pole) == poles.end())
+            poles.push_back(pole);
     }
-    if (glaze::messageBox(*this, text, "Radera", glaze::MessageBoxButtons::YesNo,
-                          glaze::MessageBoxType::Warning) != glaze::DialogResult::Yes)
+
+    const bool split = byggPmSplit_;
+    for (std::size_t w = 0; w < 3; ++w) {
+        const bool shown = w < 2 || split;
+        const Wire wire = static_cast<Wire>(w);
+        panel.names[w]->setText(kalkyl::projectdb::autoLineLabel(wire, !split));
+        if (shown) {
+            panel.names[w]->show();
+            panel.status[w]->show();
+        } else {
+            panel.names[w]->hide();
+            panel.status[w]->hide();
+        }
+
+        // En rullista per ände: "–" och Stolpplatserna, med en sparad Stolpplats som saknas sist.
+        for (std::size_t end = 0; end < 2; ++end) {
+            const std::size_t i = w * 2 + end;
+            glaze::Dropdown& drop = *panel.drops[i];
+            if (shown)
+                drop.show();
+            else
+                drop.hide();
+            const std::string& saved = end == 0 ? settings.ranges[w].fromPole : settings.ranges[w].toPole;
+
+            std::vector<std::string> itemPoles = {std::string()};
+            std::vector<std::string> itemTexts = {"–"};
+            int selected = 0;
+            for (const auto& pole : poles) {
+                if (pole == saved)
+                    selected = static_cast<int>(itemPoles.size());
+                itemPoles.push_back(pole);
+                itemTexts.push_back(pole);
+            }
+            if (!saved.empty() && selected == 0) {
+                selected = static_cast<int>(itemPoles.size());
+                itemPoles.push_back(saved);
+                itemTexts.push_back(saved + " (finns inte)");
+            }
+            if (itemTexts != panel.itemTexts[i]) {
+                drop.setItems(itemTexts);
+                panel.itemPoles[i] = std::move(itemPoles);
+                panel.itemTexts[i] = std::move(itemTexts);
+            }
+            drop.setSelectedIndex(selected);
+        }
+
+        // Statustexten ur samma beräkning som de automatiska beräkningarna bygger på.
+        if (shown) {
+            const auto span = kalkyl::automode::rangeSpan(rows, settings.ranges[w],
+                                                          kalkyl::projectdb::autoLineWord(wire, !split), table);
+            const auto status = kalkyl::automode::rangeStatus(span, rows);
+            panel.status[w]->setText(status.text);
+            if (status.ok)
+                panel.status[w]->setRole(glaze::Label::Role::Dim);
+            else
+                panel.status[w]->setColor(gfx::Color{200, 0, 0});
+        }
+    }
+}
+
+// Räknar om markeringarna i båda tabellerna och jämförelsen mellan efter och före. Markeringarna
+// av sträckorna visas bara när automatiskt läge är på för skedet.
+void MainWindow::updatePoleLooks()
+{
+    const auto& before = beforeGrid_->rows();
+    const auto& after = afterGrid_->rows();
+
+    kalkyl::polegrid::PoleLooks beforeLooks;
+    beforeLooks.marks = kalkyl::automode::tableMarks(
+        before, autoBefore_.enabled ? namedRanges(Stage::Before) : std::vector<kalkyl::automode::NamedRange>{},
+        kalkyl::projectdb::poleTableName(Stage::Before));
+    beforeGrid_->setLooks(std::move(beforeLooks));
+
+    kalkyl::polegrid::PoleLooks afterLooks;
+    afterLooks.compare = kalkyl::automode::compareAfter(before, after);
+    afterLooks.before = before;
+    afterLooks.marks = kalkyl::automode::tableMarks(
+        after, autoAfter_.enabled ? namedRanges(Stage::After) : std::vector<kalkyl::automode::NamedRange>{},
+        kalkyl::projectdb::poleTableName(Stage::After));
+    afterGrid_->setLooks(std::move(afterLooks));
+}
+
+// Sparar inställningen för skedet. Vid fel loggas det och en ruta visas, och inställningen läses
+// om så att panelen visar det som gäller. Annars räknas allt om.
+void MainWindow::saveAutoSettings(Stage stage, const kalkyl::projectdb::AutoSettings& settings)
+{
+    const auto saved = kalkyl::projectdb::setAutoSettings(*project_, stage, settings);
+    if (!saved) {
+        gfx::log("Inställningen kunde inte sparas: %s", saved.error().detail.c_str());
+        glaze::messageBox(*this, "Inställningen för automatiskt läge kunde inte sparas." + kNl + saved.error().message,
+                          "Kalkyl", glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Error);
+        if (auto current = kalkyl::projectdb::autoSettings(*project_, stage))
+            settingsOf(stage) = current.value();
+        updateAutoPanels();
+        return;
+    }
+    settingsOf(stage) = settings;
+    updateTitle();
+    refreshAutomatic();
+}
+
+// Rutan Automatiskt läge i Stolptabell före.
+void MainWindow::stolpAutoChkChanged(glaze::Widget*, glaze::ChangeArgs&)
+{
+    auto settings = autoBefore_;
+    settings.enabled = stolpAutoChk.isChecked();
+    saveAutoSettings(Stage::Before, settings);
+    if (autoBefore_.enabled == settings.enabled)
+        setPoleStatus(settings.enabled
+                          ? "Automatiskt läge är på för Stolptabell före. Raderna före ombyggnad i Dokumentation visar de automatiska beräkningarna."
+                          : "Automatiskt läge är av för Stolptabell före. Raderna i Dokumentation visar det de visade innan.");
+}
+
+// Rutan Automatiskt läge i Stolptabell efter.
+void MainWindow::efterAutoChkChanged(glaze::Widget*, glaze::ChangeArgs&)
+{
+    auto settings = autoAfter_;
+    settings.enabled = efterAutoChk.isChecked();
+    saveAutoSettings(Stage::After, settings);
+    if (autoAfter_.enabled == settings.enabled)
+        setPoleStatus(settings.enabled
+                          ? "Automatiskt läge är på för Stolptabell efter. Raderna efter ombyggnad i Dokumentation visar de automatiska beräkningarna."
+                          : "Automatiskt läge är av för Stolptabell efter. Raderna i Dokumentation visar det de visade innan.");
+}
+
+// En rullista Från eller Till ändrades. Avsändaren hittas bland panelernas rullistor, och postens
+// Stolpplats skrivs i sträckan. En post "(finns inte)" har den sparade texten, så den ändrar inget.
+void MainWindow::rangeChanged(glaze::Widget* sender, glaze::ChangeArgs&)
+{
+    for (const Stage stage : {Stage::Before, Stage::After}) {
+        AutoPanel& panel = panelOf(stage);
+        for (std::size_t i = 0; i < panel.drops.size(); ++i) {
+            if (sender != panel.drops[i])
+                continue;
+            const int chosen = panel.drops[i]->selectedIndex();
+            if (chosen < 0 || static_cast<std::size_t>(chosen) >= panel.itemPoles[i].size())
+                return;
+            auto settings = settingsOf(stage);
+            auto& range = settings.ranges[i / 2];
+            (i % 2 == 0 ? range.fromPole : range.toPole) = panel.itemPoles[i][static_cast<std::size_t>(chosen)];
+            if (settings != settingsOf(stage))
+                saveAutoSettings(stage, settings);
+            return;
+        }
+    }
+}
+
+// Undermenyn Sträcka i tabellens snabbmeny: en post för start och en för slut per aktiv lina.
+// Posterna är aktiva när projektet är skrivbart och raden har en Stolpplats.
+void MainWindow::addRangeMenuItems(Stage stage, glaze::Menu& menu, int row)
+{
+    const auto& rows = poleGridOf(stage).rows();
+    std::string pole;
+    if (row >= 0 && static_cast<std::size_t>(row) < rows.size())
+        pole = kalkyl::tabletext::trimmed(rows[static_cast<std::size_t>(row)].pole);
+    const bool enabled = !readOnly() && !pole.empty();
+
+    glaze::MenuItem& submenu = menu.addSubmenu("Sträcka");
+    for (const Wire wire : activeWires()) {
+        const std::string word = kalkyl::automode::capitalized(kalkyl::projectdb::autoLineWord(wire, !byggPmSplit_));
+        for (const bool start : {true, false}) {
+            glaze::MenuItem entry;
+            entry.text = word + (start ? " börjar här" : " slutar här");
+            entry.enabled = enabled;
+            entry.onClick = [this, stage, wire, start, pole] {
+                auto settings = settingsOf(stage);
+                auto& range = settings.ranges[static_cast<std::size_t>(wire)];
+                (start ? range.fromPole : range.toPole) = pole;
+                saveAutoSettings(stage, settings);
+            };
+            submenu.submenu.push_back(std::move(entry));
+        }
+    }
+}
+
+// En Stolpplats döptes om från from till to: varje sträcka i skedet som börjar eller slutar på
+// den gamla får den nya, och inställningen sparas.
+void MainWindow::renameInRanges(Stage stage, const std::string& from, const std::string& to)
+{
+    const std::string oldName = kalkyl::tabletext::trimmed(from);
+    const std::string newName = kalkyl::tabletext::trimmed(to);
+    auto settings = settingsOf(stage);
+    for (auto& range : settings.ranges) {
+        if (range.fromPole == oldName)
+            range.fromPole = newName;
+        if (range.toPole == oldName)
+            range.toPole = newName;
+    }
+    if (settings != settingsOf(stage))
+        saveAutoSettings(stage, settings);
+}
+
+// Noten i frågan Radera: en rad för varje sträcka (aktiv lina) som börjar eller slutar på en
+// Stolpplats bland raderna first till last.
+std::string MainWindow::rangeNote(Stage stage, int first, int last) const
+{
+    const auto& rows = poleGridOf(stage).rows();
+    std::string note;
+    for (int r = std::max(first, 0); r <= last && static_cast<std::size_t>(r) < rows.size(); ++r) {
+        const std::string pole = kalkyl::tabletext::trimmed(rows[static_cast<std::size_t>(r)].pole);
+        if (pole.empty())
+            continue;
+        for (const Wire wire : activeWires()) {
+            const auto& range = settingsOf(stage).ranges[static_cast<std::size_t>(wire)];
+            const std::string word = kalkyl::projectdb::autoLineWord(wire, !byggPmSplit_);
+            for (const bool start : {true, false}) {
+                if ((start ? range.fromPole : range.toPole) != pole)
+                    continue;
+                if (!note.empty())
+                    note += kNl;
+                note += pole + " är " + (start ? "start" : "slut") + " för " + word + " och behöver väljas om efteråt.";
+            }
+        }
+    }
+    return note;
+}
+
+// Kopiera från Stolptabell före…: är före tom visas en ruta. Har efter rader frågas först, med
+// antalen ändrade och nya rader. Vid Ja eller en tom efter ersätts efter, och inställningen
+// och tabellen läses om.
+void MainWindow::copyBeforeToAfterAsked()
+{
+    commitEdits();
+    const auto& before = beforeGrid_->rows();
+    const auto& after = afterGrid_->rows();
+    const auto beforeCount = kalkyl::poletable::rowsToSave(before).size();
+    if (beforeCount == 0) {
+        glaze::messageBox(*this, "Stolptabell före är tom. Det finns inget att kopiera.", "Kopiera från Stolptabell före",
+                          glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Information);
+        return;
+    }
+
+    if (!kalkyl::poletable::rowsToSave(after).empty()) {
+        std::size_t changed = 0;
+        std::size_t added = 0;
+        for (const auto& c : kalkyl::automode::compareAfter(before, after)) {
+            if (c.state == kalkyl::automode::RowState::Changed)
+                ++changed;
+            else if (c.state == kalkyl::automode::RowState::New)
+                ++added;
+        }
+        const std::string text =
+            "Ersätta Stolptabell efter med en kopia av Stolptabell före?" + kNl + kNl + "Stolptabell efter har " +
+            std::to_string(after.size()) + " rader, varav " + std::to_string(changed) + " ändrade och " +
+            std::to_string(added) + " nya jämfört med före. De ersätts av före-tabellens " +
+            std::to_string(before.size()) + " rader, och start och slut och automatiskt läge blir som i före.";
+        if (glaze::messageBox(*this, text, "Kopiera från Stolptabell före", glaze::MessageBoxButtons::YesNo,
+                              glaze::MessageBoxType::Warning) != glaze::DialogResult::Yes)
+            return;
+    }
+
+    const auto copied = kalkyl::projectdb::copyBeforeToAfter(*project_);
+    if (!copied) {
+        gfx::log("Stolptabell efter kunde inte kopieras: %s", copied.error().detail.c_str());
+        glaze::messageBox(*this, "Stolptabell efter kunde inte kopieras." + kNl + copied.error().message, "Kalkyl",
+                          glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Error);
+        return;
+    }
+    updateTitle();
+    afterGrid_->setRows(reloadPoles(Stage::After));
+    if (auto settings = kalkyl::projectdb::autoSettings(*project_, Stage::After))
+        autoAfter_ = settings.value();
+    refreshAutomatic();
+    setPoleStatus("Kopierade " + std::to_string(before.size()) + " rader från Stolptabell före.");
+}
+
+// Importera stolptabell…: filväljaren öppnar i senaste importmappen, annars projektfilens mapp och
+// annars Dokument. Sedan visas PoleImportDialog med filen, och vid OK byts bara raderna i Stolptabell
+// före (projectdb::importPolesBefore). Läget, sträckorna, efter och Dokumentation rörs inte, men
+// refreshAutomatic visar de omräknade automatiska beräkningarna. Ett fel visas i en ruta.
+void MainWindow::importPolesAsked()
+{
+    commitEdits();
+    std::string folder = sys_->lastImportFolder();
+    if (folder.empty())
+        folder = kalkyl::platform::parentDir(project_->path());
+    if (folder.empty())
+        folder = kalkyl::platform::documentsDir();
+
+    importFileDlg_.setTitle("Importera stolptabell");
+    importFileDlg_.setFilters({{"Excel-filer", "*.xlsx;*.xlsm"}, {glaze::tr(glaze::str::FileAllFiles), "*.*"}});
+    importFileDlg_.setFolder(folder);
+    if (importFileDlg_.run(*this) != glaze::DialogResult::OK)
+        return;
+    const std::string path = importFileDlg_.path();
+
+    // Mappen sparas av dialogen först när importen har lyckats.
+    PoleImportDialog dlg;
+    dlg.setSystemDb(*sys_);
+    dlg.setFile(path);
+    dlg.setCurrentTable(beforeGrid_->rows(), namedRanges(Stage::Before));
+    if (dlg.run(*this) != glaze::DialogResult::OK)
         return;
 
-    poleRows_.erase(poleRows_.begin() + first, poleRows_.begin() + last + 1);
-    fillPoleGrid();
-    const int target = std::min(first, static_cast<int>(poleRows_.size()));
-    poleSheet_->select({target, 0}, {target, 0});
-    savePoleTable();
-    setPoleStatus(n == 1 ? std::string("Raderade 1 rad.") : "Raderade " + std::to_string(n) + " rader.");
+    const auto imported = kalkyl::projectdb::importPolesBefore(*project_, dlg.importedRows(), dlg.importRecord());
+    if (!imported) {
+        gfx::log("Stolptabellen kunde inte importeras: %s", imported.error().detail.c_str());
+        glaze::messageBox(*this, "Stolptabellen kunde inte importeras." + kNl + imported.error().message, "Kalkyl",
+                          glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Error);
+        return;
+    }
+    updateTitle();
+    beforeGrid_->setRows(reloadPoles(Stage::Before));
+    refreshAutomatic();
+
+    const std::size_t count = dlg.importedRows().size();
+    std::string status = "Importerade " + (count == 1 ? std::string("1 stolpe") : std::to_string(count) + " stolpar") +
+                         " från " + dlg.importRecord().fileName + " till Stolptabell före.";
+    if (dlg.invalidCount() == 1)
+        status += " 1 ogiltigt tal lämnades tomt.";
+    else if (dlg.invalidCount() > 1)
+        status += " " + std::to_string(dlg.invalidCount()) + " ogiltiga tal lämnades tomma.";
+    setPoleStatus(status);
+}
+
+// Väljer fliken för skedet och gör raden aktuell i tabellen när row inte är negativ.
+void MainWindow::showPoleTab(Stage stage, int row)
+{
+    flikar.setSelectedIndex(flikar.pageIndex(stage == Stage::Before ? stolpSida : efterSida));
+    if (row >= 0)
+        poleGridOf(stage).showRow(row);
+}
+
+// Importera stolptabell…
+void MainWindow::stolpImportBtnClicked(glaze::Widget*, glaze::ClickArgs&)
+{
+    importPolesAsked();
+}
+
+// Kopiera från Stolptabell före…
+void MainWindow::efterKopieraBtnClicked(glaze::Widget*, glaze::ClickArgs&)
+{
+    copyBeforeToAfterAsked();
+}
+
+// Sträckorna som i före: start och slut hämtas ur före, men raderna och läget i efter rörs inte.
+void MainWindow::efterSomForeBtnClicked(glaze::Widget*, glaze::ClickArgs&)
+{
+    auto settings = autoAfter_;
+    settings.ranges = autoBefore_.ranges;
+    saveAutoSettings(Stage::After, settings);
+    if (autoAfter_ == settings)
+        setPoleStatus("Start och slut är nu som i Stolptabell före.");
 }
 
 // Skriver en kort text i statusradens panel för tabellens meddelanden.
@@ -943,8 +1272,7 @@ void MainWindow::rebuildByggPm()
         const gfx::Color* color = kByggPmRows[byggPmShown_[r]].color;
         inGroup = (color == previous) ? inGroup + 1 : 0;
         previous = color;
-        gfx::Color tone = *color;
-        tone.a = (inGroup % 2 == 0) ? 64 : 52;
+        const gfx::Color tone = rowTone(*color, static_cast<std::size_t>(inGroup));
         for (int col = 0; col < 3; ++col)
             byggPmGrid.setCellColor(static_cast<int>(r), col, tone, std::nullopt);
     }
@@ -1001,11 +1329,11 @@ void MainWindow::byggPmGridCommitted(glaze::Widget*, glaze::CellChangeArgs& e)
         }
         if (ok && i == kRightTopIndex && (text != kSameText) != byggPmSplit_) {
             // Läget byts i pump-svansen, så att tabellen inte byggs om mitt i sin egen händelse.
-            // Listorna i flikarna Normalspann och Linberäkning visar radernas korta namn, som följer läget.
+            // De automatiska beräkningarna beror på läget, och listorna i flikarna visar radernas
+            // korta namn, som följer läget. Allt läses därför om.
             glaze::app().post([this] {
                 rebuildByggPm();
-                fillNormalSpanList();
-                fillLineCalcList();
+                refreshAutomatic();
             });
         }
     }
@@ -1220,7 +1548,7 @@ void MainWindow::refreshNormalSpans()
     } else {
         normalSpans_ = std::move(spans.value());
         for (const auto& ns : normalSpans_)
-            nsCalcs_.push_back(kalkyl::ancalc::calculateNormalSpan(ns.poles, ns.limits));
+            nsCalcs_.push_back(kalkyl::projectdb::calculateSpan(ns));
     }
     showNormalSpanRows();
     fillNormalSpanList();
@@ -1239,14 +1567,31 @@ void MainWindow::showNormalSpanRows()
         const int index = linkedSpanIndex(rowKey(d));
 
         if (index >= 0) {
+            const auto& ns = normalSpans_[static_cast<std::size_t>(index)];
             const auto& calc = nsCalcs_[static_cast<std::size_t>(index)];
             byggPmGrid.setCellEditor(row, kValueColumn, numberEditor(Unit::Meter, true, true));
-            if (calc.result) {
+            if (ns.automatic) {
+                // Den automatiska beräkningen: Sync-bild, och sträckan eller felet i tooltipen.
+                const std::string table(kalkyl::projectdb::poleTableName(ns.automatic->stage));
+                if (calc.result) {
+                    byggPmGrid.setCell(row, kValueColumn, kalkyl::tabletext::formatDecimal(calc.result->an, -1, '.'));
+                    byggPmGrid.setCellImage(row, kValueColumn, glaze::stockIcon(glaze::StockIcon::Sync));
+                    byggPmGrid.setCellToolTip(row, kValueColumn,
+                                              "Automatisk ur " + table + ": " + ns.automatic->range.fromPole + " – " +
+                                                  ns.automatic->range.toPole + ", " +
+                                                  std::to_string(calc.result->spanCount) + " spann. Den ändras i " +
+                                                  table + ".");
+                } else {
+                    byggPmGrid.setCell(row, kValueColumn, "");
+                    byggPmGrid.setCellImage(row, kValueColumn, {});
+                    byggPmGrid.setCellToolTip(row, kValueColumn, "Automatisk ur " + table + ": " + autoErrorText(ns, calc));
+                }
+            } else if (calc.result) {
                 byggPmGrid.setCell(row, kValueColumn, kalkyl::tabletext::formatDecimal(calc.result->an, -1, '.'));
                 byggPmGrid.setCellImage(row, kValueColumn, glaze::stockIcon(glaze::StockIcon::Sum));
                 byggPmGrid.setCellToolTip(row, kValueColumn,
-                                          "Beräknad " + rangeText(normalSpans_[static_cast<std::size_t>(index)], calc) +
-                                              ", " + std::to_string(calc.result->spanCount) +
+                                          "Beräknad " + rangeText(ns, calc) + ", " +
+                                              std::to_string(calc.result->spanCount) +
                                               " spann. Högerklicka för att ändra.");
             } else {
                 byggPmGrid.setCell(row, kValueColumn, "");
@@ -1323,7 +1668,14 @@ void MainWindow::byggPmGridContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e
             const auto& linked = lineCalcs_[static_cast<std::size_t>(lcIndex)];
             const std::int64_t id = linked.id;
             const bool wasDocSource = !linked.docSource.empty();
-            if (readOnly()) {
+            if (linked.automatic) {
+                // Den automatiska beräkningen går bara att visa, och tabellen den kommer ur att gå till.
+                const Stage stage = linked.automatic->stage;
+                const int firstRow = linked.automatic->firstRow;
+                byggPmMenu_.addItem("Visa…").onClick = [this, id] { openLineCalcDialog(LcOpen::Existing, id, ""); };
+                byggPmMenu_.addItem("Gå till " + std::string(kalkyl::projectdb::poleTableName(stage))).onClick =
+                    [this, stage, firstRow] { showPoleTab(stage, firstRow); };
+            } else if (readOnly()) {
                 byggPmMenu_.addItem("Visa…").onClick = [this, id] {
                     openLineCalcDialog(LcOpen::Existing, id, "");
                 };
@@ -1390,8 +1742,16 @@ void MainWindow::byggPmGridContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e
     const std::string key = rowKey(d);
     const int index = linkedSpanIndex(key);
     if (index >= 0) {
-        const std::int64_t id = normalSpans_[static_cast<std::size_t>(index)].id;
-        if (readOnly()) {
+        const auto& shown = normalSpans_[static_cast<std::size_t>(index)];
+        const std::int64_t id = shown.id;
+        if (shown.automatic) {
+            // Den automatiska beräkningen går bara att visa, och tabellen den kommer ur att gå till.
+            const Stage stage = shown.automatic->stage;
+            const int firstRow = shown.automatic->firstRow;
+            byggPmMenu_.addItem("Visa…").onClick = [this, id] { openNormalSpanDialog(NsOpen::Existing, id, ""); };
+            byggPmMenu_.addItem("Gå till " + std::string(kalkyl::projectdb::poleTableName(stage))).onClick =
+                [this, stage, firstRow] { showPoleTab(stage, firstRow); };
+        } else if (readOnly()) {
             byggPmMenu_.addItem("Visa…").onClick = [this, id] {
                 openNormalSpanDialog(NsOpen::Existing, id, "");
             };
@@ -1416,11 +1776,15 @@ void MainWindow::byggPmGridContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e
             openNormalSpanDialog(NsOpen::New, 0, key);
         };
 
-        // Undermenyn har en post per beräkning, också de som redan visas på andra rader.
+        // Undermenyn har en post per beräkning, också de som redan visas på andra rader. De
+        // automatiska beräkningarna går inte att koppla om och visas inte.
         glaze::MenuItem& link = byggPmMenu_.addSubmenu("Koppla befintlig");
-        link.enabled = !normalSpans_.empty();
+        link.enabled = std::any_of(normalSpans_.begin(), normalSpans_.end(),
+                                   [](const auto& ns) { return !ns.automatic; });
         for (std::size_t i = 0; i < normalSpans_.size(); ++i) {
             const auto& ns = normalSpans_[i];
+            if (ns.automatic)
+                continue;
             const auto& calc = nsCalcs_[i];
             std::string text = rangeText(ns, calc) + " · ";
             text += calc.result ? kalkyl::tabletext::formatDecimal(calc.result->an, 1) + " m" : std::string("fel");
@@ -1489,6 +1853,8 @@ void MainWindow::removeNormalSpanAsked(std::int64_t id)
         return;
     const auto& ns = normalSpans_[index];
     const auto& calc = nsCalcs_[index];
+    if (ns.automatic)
+        return;
 
     std::string text = "Ta bort normalspannsberäkningen " + rangeText(ns, calc) + " (";
     if (calc.result)
@@ -1526,8 +1892,9 @@ void MainWindow::removeNormalSpanAsked(std::int64_t id)
     reloadAfterChange();
 }
 
-// Bygger listan i fliken Normalspann: en rad per beräkning med de nio kolumnerna, gul växlande
-// radton och sorteringsnycklar för talkolumnerna. Den tidigare valda beräkningen väljs igen.
+// Bygger listan i fliken Normalspann: en rad per beräkning med de tio kolumnerna, gul växlande
+// radton (lila eller rosa med Sync-bild för en automatisk beräkning) och sorteringsnycklar för
+// talkolumnerna. Den tidigare valda beräkningen väljs igen.
 void MainWindow::fillNormalSpanList()
 {
     std::optional<std::int64_t> previous;
@@ -1542,14 +1909,17 @@ void MainWindow::fillNormalSpanList()
         const auto& calc = nsCalcs_[i];
         const auto poles = polesOf(ns, calc);
         glaze::ListView::Row row;
-        row.cells = {poleText(poles.first),
+        if (ns.automatic)
+            row.img = glaze::stockIcon(glaze::StockIcon::Sync);
+        row.cells = {ns.automatic ? std::string("Automatisk") : std::string("Manuell"),
+                     poleText(poles.first),
                      poleText(poles.second),
                      calc.result ? std::to_string(calc.result->spanCount) : std::string("–"),
                      calc.result ? kalkyl::tabletext::formatDecimal(calc.result->totalM, 1) : std::string("–"),
                      calc.result ? kalkyl::tabletext::formatDecimal(calc.result->an, 1) : std::string("–"),
                      calc.result && calc.result->anDeltaH ? kalkyl::tabletext::formatDecimal(*calc.result->anDeltaH, 1)
                                                           : std::string("–"),
-                     calc.result ? std::to_string(deviationCount(*calc.result)) : std::string("Fel"),
+                     calc.result ? std::to_string(kalkyl::automode::deviationCount(*calc.result)) : std::string("Fel"),
                      shortRowsText(ns),
                      ns.note};
         rows.push_back(std::move(row));
@@ -1561,14 +1931,13 @@ void MainWindow::fillNormalSpanList()
         const int row = static_cast<int>(i);
         const auto& calc = nsCalcs_[i];
         if (calc.result) {
-            nsLista.setSortKey(row, 2, calc.result->spanCount);
-            nsLista.setSortKey(row, 3, calc.result->totalM);
-            nsLista.setSortKey(row, 4, calc.result->an);
-            nsLista.setSortKey(row, 5, calc.result->anDeltaH.value_or(0));
-            nsLista.setSortKey(row, 6, deviationCount(*calc.result));
+            nsLista.setSortKey(row, 3, calc.result->spanCount);
+            nsLista.setSortKey(row, 4, calc.result->totalM);
+            nsLista.setSortKey(row, 5, calc.result->an);
+            nsLista.setSortKey(row, 6, calc.result->anDeltaH.value_or(0));
+            nsLista.setSortKey(row, 7, kalkyl::automode::deviationCount(*calc.result));
         }
-        gfx::Color tone = kAmber;
-        tone.a = (i % 2 == 0) ? 64 : 52;
+        const gfx::Color tone = calcTone(normalSpans_[i].automatic, i);
         for (int col = 0; col < nsLista.columnCount(); ++col)
             nsLista.setCellColor(row, col, tone, std::nullopt);
     }
@@ -1595,23 +1964,26 @@ void MainWindow::updateNsButtons()
         else
             b.disable();
     };
+    const bool automatic = has && normalSpans_[static_cast<std::size_t>(selected)].automatic;
     set(nsNyBtn, write);
     set(nsAndraBtn, has);
     set(nsKopieraBtn, has && write);
-    set(nsTaBortBtn, has && write);
-    nsAndraBtn.setText(write ? "Ändra…" : "Visa…");
+    set(nsTaBortBtn, has && write && !automatic);
+    nsAndraBtn.setText(write && !automatic ? "Ändra…" : "Visa…");
 
     std::string tip;
     if (has) {
         const auto& ns = normalSpans_[static_cast<std::size_t>(selected)];
         const auto& calc = nsCalcs_[static_cast<std::size_t>(selected)];
+        if (ns.automatic)
+            tip = ns.note + kNl;
         if (calc.result) {
             const auto& r = *calc.result;
-            tip = "Avvikelser, 1: " + std::to_string(r.tooLongCount) + " · 2: " + std::to_string(r.tooShortCount) +
-                  " · 3: " + std::to_string(r.adjacentCount) + " · 4: " + std::to_string(r.localLowCount) +
-                  " · 5: " + std::to_string(r.localHighCount);
+            tip += "Avvikelser, 1: " + std::to_string(r.tooLongCount) + " · 2: " + std::to_string(r.tooShortCount) +
+                   " · 3: " + std::to_string(r.adjacentCount) + " · 4: " + std::to_string(r.localLowCount) +
+                   " · 5: " + std::to_string(r.localHighCount);
         } else {
-            tip = "Beräkningen har fel: " + firstError(calc);
+            tip += "Beräkningen har fel: " + (ns.automatic ? autoErrorText(ns, calc) : firstError(calc));
         }
         tip += kNl;
         std::string rows;
@@ -1624,6 +1996,9 @@ void MainWindow::updateNsButtons()
             rows += kNl + fullDocLabel(key);
         }
         tip += rows.empty() ? std::string("Visas inte i Dokumentation.") : "Visas i Dokumentation på" + rows;
+        if (ns.automatic)
+            tip += kNl + "Automatisk: den ändras i " + std::string(kalkyl::projectdb::poleTableName(ns.automatic->stage)) +
+                   " och kan inte tas bort.";
     }
     nsLista.setToolTip(tip);
 }
@@ -1681,7 +2056,18 @@ void MainWindow::nsListaContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e)
         return;
     const std::int64_t id = nsListIds_[static_cast<std::size_t>(row)];
     nsMenu_.items.clear();
-    if (readOnly()) {
+    if (const auto& origin = normalSpans_[static_cast<std::size_t>(row)].automatic) {
+        // Den automatiska beräkningen: Visa…, Kopiera… och en väg till tabellen den kommer ur.
+        const Stage stage = origin->stage;
+        const int firstRow = origin->firstRow;
+        nsMenu_.addItem("Visa…").onClick = [this, id] { openNormalSpanDialog(NsOpen::Existing, id, ""); };
+        glaze::MenuItem& copy = nsMenu_.addItem("Kopiera…");
+        copy.enabled = !readOnly();
+        copy.onClick = [this, id] { openNormalSpanDialog(NsOpen::Copy, id, ""); };
+        nsMenu_.addSeparator();
+        nsMenu_.addItem("Gå till " + std::string(kalkyl::projectdb::poleTableName(stage))).onClick =
+            [this, stage, firstRow] { showPoleTab(stage, firstRow); };
+    } else if (readOnly()) {
         nsMenu_.addItem("Visa…").onClick = [this, id] { openNormalSpanDialog(NsOpen::Existing, id, ""); };
     } else {
         nsMenu_.addItem("Ändra…").onClick = [this, id] { openNormalSpanDialog(NsOpen::Existing, id, ""); };
@@ -1754,16 +2140,25 @@ void MainWindow::showLineCalcRows()
         byggPmGrid.setCellEditor(row, kValueColumn, numberEditor(Unit::Mall, true, true));
         if (calc.result) {
             const std::string over = overCases(*calc.result);
-            std::string tip = std::string("Stakningsmall (lastfall 15, maxtemperatur) ur en ") +
-                              (lc.docSource.empty() ? "manuell linberäkning: " : "linberäkning med indata ur Dokumentation: ") +
-                              conductorText(input) + ", aₙ " + spanText(input) + " m, σ₀ " + tensionText(input) +
-                              " MPa. Högerklicka för att ändra.";
+            std::string tip;
+            if (lc.automatic) {
+                const std::string table(kalkyl::projectdb::poleTableName(lc.automatic->stage));
+                tip = "Stakningsmall (lastfall 15, maxtemperatur) ur den automatiska linberäkningen: " +
+                      conductorText(input) + ", aₙ " + spanText(input) + " m ur " + table + ", σ₀ " +
+                      tensionText(input) + " MPa. Den ändras i " + table + " och Dokumentation.";
+            } else {
+                tip = std::string("Stakningsmall (lastfall 15, maxtemperatur) ur en ") +
+                      (lc.docSource.empty() ? "manuell linberäkning: " : "linberäkning med indata ur Dokumentation: ") +
+                      conductorText(input) + ", aₙ " + spanText(input) + " m, σ₀ " + tensionText(input) +
+                      " MPa. Högerklicka för att ändra.";
+            }
             if (!over.empty())
                 tip += " Utnyttjandegraden är över " + shortNumber(input.constants.maxUtilizationPercent) +
                        " % i lastfall " + over + ".";
             byggPmGrid.setCell(row, kValueColumn, mallText(calc));
+            const auto okIcon = lc.automatic ? glaze::StockIcon::Sync : glaze::StockIcon::Sum;
             byggPmGrid.setCellImage(row, kValueColumn,
-                                    glaze::stockIcon(over.empty() ? glaze::StockIcon::Sum : glaze::StockIcon::Warning));
+                                    glaze::stockIcon(over.empty() ? okIcon : glaze::StockIcon::Warning));
             byggPmGrid.setCellToolTip(row, kValueColumn, tip);
         } else {
             const std::string error = firstIssueOf(calc, kalkyl::linecalc::LineIssueKind::Error);
@@ -1795,8 +2190,11 @@ void MainWindow::fillLineCalcList()
         const auto& input = lcResolved_[i].input;
         const auto& calc = lcCalcs_[i];
         glaze::ListView::Row row;
+        if (lc.automatic)
+            row.img = glaze::stockIcon(glaze::StockIcon::Sync);
         row.cells = {conductorText(input),
-                     lc.docSource.empty() ? std::string("Manuell") : std::string("Dokumentation"),
+                     lc.automatic ? std::string("Automatisk")
+                                  : lc.docSource.empty() ? std::string("Manuell") : std::string("Dokumentation"),
                      input.mode == kalkyl::linecalc::CalcMode::New ? std::string("Ny") : std::string("Excel"),
                      spanText(input),
                      tensionText(input),
@@ -1834,8 +2232,7 @@ void MainWindow::fillLineCalcList()
             lcLista.setSortKey(row, kLcUtilColumn, best);
         }
 
-        gfx::Color tone = kAmber;
-        tone.a = (i % 2 == 0) ? 64 : 52;
+        const gfx::Color tone = calcTone(lineCalcs_[i].automatic, i);
         for (int col = 0; col < lcLista.columnCount(); ++col) {
             std::optional<gfx::Color> text;
             if ((col == kLcUtilColumn && over) || (col == kLcMallColumn && hasLineError(calc)))
@@ -1866,11 +2263,12 @@ void MainWindow::updateLcButtons()
         else
             b.disable();
     };
+    const bool automatic = has && lineCalcs_[static_cast<std::size_t>(selected)].automatic;
     set(lcNyBtn, write);
     set(lcAndraBtn, has);
     set(lcKopieraBtn, has && write);
-    set(lcTaBortBtn, has && write);
-    lcAndraBtn.setText(write ? "Ändra…" : "Visa…");
+    set(lcTaBortBtn, has && write && !automatic);
+    lcAndraBtn.setText(write && !automatic ? "Ändra…" : "Visa…");
 
     std::string tip;
     if (has) {
@@ -1879,12 +2277,14 @@ void MainWindow::updateLcButtons()
         const std::string error = firstIssueOf(calc, kalkyl::linecalc::LineIssueKind::Error);
         const std::string missing = firstIssueOf(calc, kalkyl::linecalc::LineIssueKind::Missing);
         const std::string warning = firstIssueOf(calc, kalkyl::linecalc::LineIssueKind::Warning);
+        if (automatic)
+            tip = lineCalcs_[i].note + kNl;
         if (!error.empty()) {
-            tip = "Linberäkningen har fel: " + error;
+            tip += "Linberäkningen har fel: " + error;
         } else if (!missing.empty()) {
-            tip = "Linberäkningen saknar indata: " + missing;
+            tip += "Linberäkningen saknar indata: " + missing;
         } else if (calc.result) {
-            tip = "Stakningsmall " + mallText(calc) + " · Högsta utnyttjandegrad " + utilizationText(calc);
+            tip += "Stakningsmall " + mallText(calc) + " · Högsta utnyttjandegrad " + utilizationText(calc);
             if (!warning.empty())
                 tip += kNl + warning;
         }
@@ -1900,6 +2300,10 @@ void MainWindow::updateLcButtons()
             rows += kNl + fullDocLabel(key);
         }
         tip += rows.empty() ? std::string("Visas inte i Dokumentation.") : "Visas i Dokumentation på" + rows;
+        if (automatic)
+            tip += kNl + "Automatisk: den ändras i " +
+                   std::string(kalkyl::projectdb::poleTableName(lineCalcs_[i].automatic->stage)) +
+                   " och kan inte tas bort.";
     }
     lcLista.setToolTip(tip);
 }
@@ -1971,6 +2375,8 @@ void MainWindow::removeLineCalcAsked(std::int64_t id)
         return;
     const auto& lc = lineCalcs_[index];
     const auto& calc = lcCalcs_[index];
+    if (lc.automatic)
+        return;
 
     std::string text = "Ta bort linberäkningen " + conductorText(lcResolved_[index].input) + " (" +
                        (lc.docSource.empty() ? "Manuell" : "Indata ur Dokumentation") + ", ";
@@ -2061,7 +2467,18 @@ void MainWindow::lcListaContextMenu(glaze::Widget*, glaze::ContextMenuArgs& e)
         return;
     const std::int64_t id = lcListIds_[static_cast<std::size_t>(row)];
     lcMenu_.items.clear();
-    if (readOnly()) {
+    if (const auto& origin = lineCalcs_[static_cast<std::size_t>(row)].automatic) {
+        // Den automatiska beräkningen: Visa…, Kopiera… och en väg till tabellen den kommer ur.
+        const Stage stage = origin->stage;
+        const int firstRow = origin->firstRow;
+        lcMenu_.addItem("Visa…").onClick = [this, id] { openLineCalcDialog(LcOpen::Existing, id, ""); };
+        glaze::MenuItem& copy = lcMenu_.addItem("Kopiera…");
+        copy.enabled = !readOnly();
+        copy.onClick = [this, id] { openLineCalcDialog(LcOpen::Copy, id, ""); };
+        lcMenu_.addSeparator();
+        lcMenu_.addItem("Gå till " + std::string(kalkyl::projectdb::poleTableName(stage))).onClick =
+            [this, stage, firstRow] { showPoleTab(stage, firstRow); };
+    } else if (readOnly()) {
         lcMenu_.addItem("Visa…").onClick = [this, id] { openLineCalcDialog(LcOpen::Existing, id, ""); };
     } else {
         lcMenu_.addItem("Ändra…").onClick = [this, id] { openLineCalcDialog(LcOpen::Existing, id, ""); };

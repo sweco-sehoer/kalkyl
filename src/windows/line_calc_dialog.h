@@ -287,6 +287,7 @@ private:
     std::int64_t copyOfId_ = 0;               // beräkningen som kopieras, 0 = ingen
     std::vector<std::pair<std::string, std::string>> docLabels_;   // radtext per nyckel
     bool readOnly_ = false;
+    std::optional<kalkyl::projectdb::AutoOrigin> automatic_;   // satt för en automatisk beräkning
     bool dirty_ = false;                      // något är ändrat sedan inläsningen
     bool saved_ = false;                      // sparat: onClosing frågar inte
     std::optional<std::int64_t> savedId_;

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 # Projektets version (major.minor.patch) står bara här.
 # Den skrivs in i version.h vid konfigurering, se libs/version/CMakeLists.txt.
 project(Kalkyl
-        VERSION 0.4.0
+        VERSION 0.5.0
         DESCRIPTION "Luftledningsberäkningar"
         LANGUAGES C CXX)
 
@@ -29,6 +29,16 @@ FetchContent_Declare(GlazeUI
     GIT_SHALLOW    TRUE
     SYSTEM)
 FetchContent_MakeAvailable(GlazeUI)
+
+# miniz (zip) hämtas på en fast tagg, aldrig master. Bara källorna hämtas (SOURCE_SUBDIR pekar på
+# en katalog som inte finns): libs/xlsx bygger dem som kalkyl_miniz, eftersom minizs egen
+# CMakeLists ändrar CMAKE_C_FLAGS och kräver CMake 3.5. Lokal utcheckning: -DFETCHCONTENT_SOURCE_DIR_MINIZ=<sökväg>.
+FetchContent_Declare(miniz
+    GIT_REPOSITORY https://github.com/richgel999/miniz.git
+    GIT_TAG        3.1.2
+    GIT_SHALLOW    TRUE
+    SOURCE_SUBDIR  kalkyl-bara-kallor)
+FetchContent_MakeAvailable(miniz)
 
 # Headless-testerna (ctest). Alla tester ligger i tests/, aldrig bland källkoden.
 option(KALKYL_TESTS "Bygg Kalkyls headless-tester (ctest)" OFF)
