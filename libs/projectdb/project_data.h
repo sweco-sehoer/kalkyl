@@ -12,6 +12,7 @@
 #include "conductor/conductor.h"
 #include "core/result.h"
 #include "lineCalc/line_calc.h"
+#include "lineHeight/line_height.h"
 #include "poleTable/import_record.h"
 #include "poleTable/pole_table.h"
 #include "projectdb/project_db.h"
@@ -193,12 +194,14 @@ core::Result<void> detachLineCalc(ProjectDb& p, std::int64_t id);
 // Fel: AccessDenied, Sql.
 core::Result<void> removeLineCalc(ProjectDb& p, std::int64_t id);
 
-// Stolptabellen för skedet i tabellens ordning. En tom tabell ger en tom lista.
+// Stolptabellen för skedet i tabellens ordning. En tom tabell ger en tom lista. Stolptabell efter
+// ger radernas id (PoleRow::id), före ger alltid id 0.
 core::Result<std::vector<poletable::PoleRow>> poles(ProjectDb& p, Stage stage);
 // Ersätter hela stolptabellen för skedet i EN transaktion med poletable::rowsToSave(rows): tomma
 // rader mitt i sparas, tomma rader sist inte. Positionerna blir 0, 1, 2 ... Talen ska vara
-// kanonisk decimaltext (poletable::acceptField). De automatiska beräkningarna följer med i samma
-// transaktion. Fel: AccessDenied, Invalid ("Stolptabell före har ett ogiltigt tal på rad <n> i
+// kanonisk decimaltext (poletable::acceptField). I efter får rader utan id ett
+// (poletable::assignRowIds), och linhöjderna som inte längre hör till raderna tas bort. De
+// automatiska beräkningarna följer med i samma transaktion. Fel: AccessDenied, Invalid ("Stolptabell före har ett ogiltigt tal på rad <n> i
 // kolumnen <namn>." respektive "Stolptabell efter …"), Sql.
 core::Result<void> setPoles(ProjectDb& p, Stage stage, const std::vector<poletable::PoleRow>& rows);
 
@@ -220,7 +223,8 @@ core::Result<AutoSettings> autoSettings(ProjectDb& p, Stage stage);
 // transaktion. Fel: AccessDenied, Sql.
 core::Result<void> setAutoSettings(ProjectDb& p, Stage stage, const AutoSettings& s);
 // Stolptabell efter blir en kopia av Stolptabell före: alla rader, sträckorna och läget, i EN
-// transaktion med de automatiska beräkningarna. Det som fanns i efter försvinner.
+// transaktion med de automatiska beräkningarna. Det som fanns i efter försvinner. Raderna i efter
+// får nya id (position + 1), och alla linhöjder tas bort.
 // Fel: AccessDenied, Sql.
 core::Result<void> copyBeforeToAfter(ProjectDb& p);
 
@@ -238,5 +242,21 @@ core::Result<void> importPolesBefore(ProjectDb& p, const std::vector<poletable::
 // Den senaste importens rådata, eller tomt svar när ingen import har gjorts. Kolumnerna i
 // kolumnordning, raderna i platsordning och cellerna i kolumnordning. Fel: Sql.
 core::Result<std::optional<poletable::ImportRecord>> lastPoleImport(ProjectDb& p);
+
+// Linhöjderna i fliken Linhöjder: spannen (radernas id) och topplinans Av per rad som användaren
+// har skrivit. Allt hör till rader som finns i Stolptabell efter (planen 7.6). Tomt svar när inget
+// är sparat.
+core::Result<lineheight::StoredHeights> lineHeights(ProjectDb& p);
+
+// Skriver en del av ett spann som kanonisk decimaltext >= 0. Tom text tar bort värdet, och ett
+// spann utan värden tas bort. Fel: AccessDenied, Invalid för ogiltig nyckel eller ogiltigt tal,
+// och NotFound för ett spann som inte är två grannrader i Stolptabell efter.
+core::Result<void> setSpanHeight(ProjectDb& p, const lineheight::SpanKey& span, lineheight::Part part,
+                                 const std::string& value);
+
+// Skriver topplinans Av för raden med id row i Stolptabell efter som kanonisk decimaltext. Tom
+// text tar bort värdet. Fel: AccessDenied, Invalid för id <= 0 eller ogiltigt tal, och NotFound
+// för en rad som inte finns eller är helt tom.
+core::Result<void> setTopAv(ProjectDb& p, std::int64_t row, const std::string& value);
 
 } // namespace kalkyl::projectdb

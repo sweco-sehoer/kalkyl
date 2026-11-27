@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <set>
 
 #include "tableText/table_text.h"
 
@@ -166,7 +167,7 @@ std::optional<double> numberValue(const PoleRow& row, int column)
     return tabletext::parseDecimal(field(row, column));
 }
 
-// Sant när alla tio fält är tomma.
+// Sant när alla tio fält är tomma. Radens id är inget fält och räknas inte.
 bool isEmptyRow(const PoleRow& row)
 {
     for (int c = 0; c < kFieldCount; ++c)
@@ -191,7 +192,8 @@ std::optional<int> firstInvalidColumn(const PoleRow& row)
     return std::nullopt;
 }
 
-// Skriver ändringarna i ordning. Rader bortom slutet läggs till som tomma rader.
+// Skriver ändringarna i ordning. Rader bortom slutet läggs till som tomma rader med id 0, och
+// id:t i en befintlig rad står kvar.
 void applyEdits(std::vector<PoleRow>& rows, const std::vector<Edit>& edits)
 {
     for (const Edit& edit : edits) {
@@ -210,12 +212,28 @@ void trimTrailingEmptyRows(std::vector<PoleRow>& rows)
         rows.pop_back();
 }
 
-// Raderna som sparas: tomma rader mitt i behålls, tomma rader sist tas bort.
+// Raderna som sparas: tomma rader mitt i behålls, tomma rader sist tas bort. Id:na följer med.
 std::vector<PoleRow> rowsToSave(const std::vector<PoleRow>& rows)
 {
     std::vector<PoleRow> out = rows;
     trimTrailingEmptyRows(out);
     return out;
+}
+
+// Ger rader utan id (<= 0) och senare dubbletter nästa lediga id, högsta id + 1, i tabellens
+// ordning. Rader med ett giltigt och unikt id lämnas orörda.
+void assignRowIds(std::vector<PoleRow>& rows)
+{
+    std::int64_t highest = 0;
+    for (const PoleRow& row : rows)
+        highest = std::max(highest, row.id);
+    std::set<std::int64_t> seen;
+    for (PoleRow& row : rows) {
+        if (row.id <= 0 || !seen.insert(row.id).second) {
+            row.id = ++highest;
+            seen.insert(row.id);
+        }
+    }
 }
 
 } // namespace kalkyl::poletable

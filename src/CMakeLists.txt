@@ -26,9 +26,11 @@ target_link_libraries(kalkyl PRIVATE
     kalkyl_ancalc
     kalkyl_automode
     kalkyl_poleview
+    kalkyl_lineheight
     kalkyl_linecalc
     kalkyl_sheetgrid
     kalkyl_polegrid
+    kalkyl_lineheightsheet
     kalkyl_poletable
     kalkyl_xlsx
     kalkyl_poleimport

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,6 +27,8 @@ inline constexpr int kFieldCount = 10;
 // En rad i stolptabellen. Talen är kanonisk decimaltext (tabletext::normalizeDecimal): punkt
 // som decimaltecken, inga tusentalsavgränsare och exakt de decimaler användaren skrev.
 // Tom text = tom cell. Textfälten är trimmade. av2 och av3 används bara i Stolptabell efter.
+// id är radens id i Stolptabell efter (> 0, unikt i tabellen, 0 = inget id än) och inget fält:
+// det syns aldrig i tabellen, urklippet eller jämförelsen med före, och i Stolptabell före är det alltid 0.
 struct PoleRow {
     std::string pole;
     std::string av;
@@ -37,8 +40,13 @@ struct PoleRow {
     std::string lkl;
     std::string av2;
     std::string av3;
+    std::int64_t id = 0;
     bool operator==(const PoleRow&) const = default;
 };
+
+// Ger varje rad med id <= 0, eller med ett id som redan stått tidigare i listan, nästa lediga id
+// (högsta id + 1) i tabellens ordning. Andra rader och alla fält är orörda.
+void assignRowIds(std::vector<PoleRow>& rows);
 
 // Fältet i Stolptabell före som ett fält i efter jämförs med och återställs från: Av Fas2 och
 // Fas3 jämförs med Av, de andra med sig själva.
@@ -83,7 +91,7 @@ std::string copyText(const PoleRow& row, int column);
 // Talet i en talkolumn, för beräkningar. Tomt för tom cell, textkolumn eller ogiltig text.
 std::optional<double> numberValue(const PoleRow& row, int column);
 
-// Sant när alla tio fält är tomma.
+// Sant när alla tio fält är tomma. Radens id räknas inte.
 bool isEmptyRow(const PoleRow& row);
 
 // Första talfältet vars text varken är tom eller kanonisk decimaltext, annars tomt svar.
@@ -92,7 +100,8 @@ std::optional<int> firstInvalidColumn(const PoleRow& row);
 // En ändrad cell: rad, fält 0-9 och texten som acceptField gav.
 struct Edit { int row = 0; int column = 0; std::string text; };
 
-// Skriver ändringarna. En rad bortom slutet ger nya tomma rader fram till och med den.
+// Skriver ändringarna. En rad bortom slutet ger nya tomma rader (id 0) fram till och med den.
+// Radens id i en befintlig rad står kvar.
 // Ändringar med negativ rad eller fält utanför 0-9 ignoreras.
 void applyEdits(std::vector<PoleRow>& rows, const std::vector<Edit>& edits);
 
@@ -100,7 +109,7 @@ void applyEdits(std::vector<PoleRow>& rows, const std::vector<Edit>& edits);
 void trimTrailingEmptyRows(std::vector<PoleRow>& rows);
 
 // Raderna som sparas: alla rader i ordning, också tomma rader mitt i. Bara helt tomma rader
-// sist tas bort.
+// sist tas bort. Radernas id följer med.
 std::vector<PoleRow> rowsToSave(const std::vector<PoleRow>& rows);
 
 } // namespace kalkyl::poletable

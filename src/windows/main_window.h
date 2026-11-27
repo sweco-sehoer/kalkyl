@@ -15,6 +15,8 @@
 #include "autoMode/auto_mode.h"
 #include "conductor/conductor.h"
 #include "lineCalc/line_calc.h"
+#include "lineHeight/line_height.h"
+#include "lineHeightSheet/line_height_sheet.h"
 #include "poleGrid/pole_grid.h"
 #include "poleTable/pole_table.h"
 #include "poleView/pole_view.h"
@@ -39,6 +41,7 @@ private:
     glaze::TabPage byggPmSida;
     glaze::TabPage stolpSida;
     glaze::TabPage efterSida;
+    glaze::TabPage linSida;
     glaze::TabPage nsSida;
     glaze::TabPage lcSida;
     glaze::Panel byggPmPanel;
@@ -104,6 +107,11 @@ private:
     glaze::Button efterVisaBtn;
     glaze::Label efterFilterInfo;
     glaze::DataGrid efterGrid;
+    glaze::Panel linPanel;
+    glaze::Label linRubrik;
+    glaze::Label linInfo;
+    glaze::Label linOmrade;
+    kalkyl::lineheightsheet::LineHeightSheet linBlad;
     glaze::Panel nsPanel;
     glaze::Panel lcPanel;
     glaze::Label nsRubrik;
@@ -459,8 +467,17 @@ private:
     std::vector<kalkyl::poletable::PoleRow> reloadPoles(kalkyl::projectdb::Stage stage);
 
     // Läser om de automatiska beräkningarna ur projektet och uppdaterar Dokumentation, flikarna
-    // Normalspann och Linberäkning, panelerna Automatiskt läge och tabellernas färger.
+    // Normalspann och Linberäkning, panelerna Automatiskt läge, tabellernas färger och fliken
+    // Linhöjder.
     void refreshAutomatic();
+
+    // Linhöjdsbladet sparade en cell: talet kontrolleras (lineheight::acceptHeight eller acceptAv)
+    // och skrivs i projektet, och bladet räknas om. Ogiltig text visas i statusraden.
+    void linBladCommitted(glaze::Widget* sender, glaze::ChangeArgs& e);
+
+    // Bygger fliken Linhöjder ur stolptabellerna och de sparade linhöjderna: blocken, bladet och
+    // områdestexten. Utan block döljs bladet.
+    void refreshLineHeights();
 
     // Fyller panelerna Automatiskt läge för båda skedena.
     void updateAutoPanels();

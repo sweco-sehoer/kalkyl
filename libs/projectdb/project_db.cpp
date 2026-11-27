@@ -41,8 +41,9 @@ CREATE TABLE project (
 constexpr std::string_view kExpectedTablesSql =
     "('project', 'project_conductor', 'doc_value', 'normal_span', 'normal_span_pole', 'doc_normal_span', "
     "'line_calc', 'line_calc_case', 'doc_line_calc', 'pole_before', 'pole_after', 'auto_mode', 'auto_calc', "
-    "'pole_import', 'pole_import_column', 'pole_import_row', 'pole_import_cell')";
-constexpr int kExpectedTableCount = 17;
+    "'pole_import', 'pole_import_column', 'pole_import_row', 'pole_import_cell', 'line_height_span', "
+    "'line_height_pole')";
+constexpr int kExpectedTableCount = 19;
 
 // Schemat för projektfilen: steg 1 och utvecklingsmigreringens steg (dev_migration.h).
 // Bara create får initiera en tom fil.
@@ -50,7 +51,8 @@ db::Schema schema(bool allowInitialize)
 {
     db::Schema s;
     s.applicationId = kApplicationId;
-    s.steps = {kSchemaV1, dev::kStep2, dev::kStep3, dev::kStep4, dev::kStep5, dev::kStep6, dev::kStep7};
+    s.steps = {kSchemaV1, dev::kStep2, dev::kStep3, dev::kStep4, dev::kStep5, dev::kStep6, dev::kStep7,
+               dev::kStep8};
     s.allowInitialize = allowInitialize;
     return s;
 }

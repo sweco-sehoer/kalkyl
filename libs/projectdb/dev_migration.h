@@ -266,4 +266,35 @@ ALTER TABLE pole_after ADD COLUMN av3 TEXT;
 UPDATE pole_after SET av2 = av, av3 = av;
 )sql";
 
+// Steg 8 (user_version 7 -> 8): radernas id i Stolptabell efter och linhöjderna i fliken
+// Linhöjder. row_id är ett tal > 0, unikt i tabellen, som följer raden när rader infogas, raderas
+// och ändras. De befintliga raderna får position + 1. ADD COLUMN får ingen CHECK, eftersom SQLite
+// prövar den mot de befintliga raderna innan UPDATE har gett dem id.
+inline constexpr std::string_view kStep8 = R"sql(
+-- Radernas id i Stolptabell efter: ett tal > 0, unikt i tabellen, som följer raden när rader
+-- infogas, raderas och ändras, och som linhöjderna hänger på. Det är inget fält i tabellen utan
+-- skrivs av Kalkyl (poletable::assignRowIds). De befintliga raderna får position + 1.
+ALTER TABLE pole_after ADD COLUMN row_id INTEGER NOT NULL DEFAULT 0;
+UPDATE pole_after SET row_id = position + 1;
+CREATE UNIQUE INDEX IF NOT EXISTS pole_after_row_id ON pole_after(row_id);
+-- Linhöjderna i fliken Linhöjder: en rad per spann mellan två grannrader i Stolptabell efter.
+-- row_a och row_b är radernas row_id med row_a < row_b. Värdena är kanonisk decimaltext och NULL
+-- när de inte är ifyllda. En rad utan värden tas bort. Ett spann vars rader inte längre är
+-- grannar tas bort i samma transaktion som ändringen i efter (pruneLineHeights).
+CREATE TABLE IF NOT EXISTS line_height_span (
+    row_a    INTEGER NOT NULL CHECK (row_a > 0),
+    row_b    INTEGER NOT NULL,
+    outer_m  TEXT,
+    middle_m TEXT,
+    top_m    TEXT,
+    PRIMARY KEY (row_a, row_b),
+    CHECK (row_a < row_b)
+) WITHOUT ROWID;
+-- Topplinans Av per rad i Stolptabell efter (row_id), kanonisk decimaltext skriven av användaren.
+CREATE TABLE IF NOT EXISTS line_height_pole (
+    row_id INTEGER PRIMARY KEY CHECK (row_id > 0),
+    top_av TEXT NOT NULL
+);
+)sql";
+
 } // namespace kalkyl::projectdb::dev

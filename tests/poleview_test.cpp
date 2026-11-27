@@ -107,6 +107,7 @@ void testBuildView()
     CHECK(buildView(n, marksOf(n, {20, 780}), Filter::Changed) ==
           expected({{H, 0, 17}, {P, 18, 782}, {H, 783, 800}}, n));
     CHECK(buildView(n, marksOf(n, {0}), Filter::Changed) == expected({{P, 0, 2}, {H, 3, 800}}, n));
+    // Rad 0 är ensam före området och visas.
     CHECK(buildView(n, marksOf(n, {3}), Filter::Changed) == expected({{P, 0, 5}, {H, 6, 800}}, n));
     CHECK(buildView(n, marksOf(n, {800}), Filter::Changed) == expected({{H, 0, 797}, {P, 798, 800}}, n));
 
@@ -123,6 +124,23 @@ void testBuildView()
     // Poster bortom count ignoreras, och saknade poster är falska.
     CHECK(buildView(3, marksOf(10, {8}), Filter::Changed) == identityView(3));
     CHECK(buildView(10, marksOf(2, {1}), Filter::Changed) == expected({{P, 0, 3}, {H, 4, 9}}, 10));
+}
+
+// Det ändrade området med olika marginaler, klampat till tabellen.
+void testChangedArea()
+{
+    const int n = 801;
+    CHECK(changedArea(n, marksOf(n, {350}), 1) == MarkedRange({349, 351}));
+    CHECK(changedArea(n, marksOf(n, {0}), 1) == MarkedRange({0, 1}));
+    CHECK(changedArea(n, marksOf(n, {800}), 1) == MarkedRange({799, 800}));
+    CHECK(changedArea(n, marksOf(n, {20, 780}), 1) == MarkedRange({19, 781}));
+    CHECK(changedArea(n, marksOf(n, {}), 1) == MarkedRange({-1, -1}));
+    CHECK(changedArea(n, marksOf(n, {350}), 2) == MarkedRange({348, 352}));
+    CHECK(changedArea(n, marksOf(n, {0}), 2) == MarkedRange({0, 2}));
+    CHECK(changedArea(n, marksOf(n, {350}), 0) == MarkedRange({350, 350}));
+    // Poster bortom count räknas inte.
+    CHECK(changedArea(3, marksOf(10, {8}), 1) == MarkedRange({-1, -1}));
+    CHECK(changedArea(0, {}, 1) == MarkedRange({-1, -1}));
 }
 
 // Raderna som de blir i Stolptabell efter vid en kopiering från före: Av i alla tre faserna.
@@ -358,6 +376,7 @@ void testSummary()
 int main()
 {
     testBuildView();
+    testChangedArea();
     testFilterMarks();
     testRemovedAnchors();
     testIndex();

@@ -60,6 +60,9 @@ void MainWindow::initializeComponent()
     efterSida.name = "efterSida";
     efterSida.setText("Stolptabell efter");
 
+    linSida.name = "linSida";
+    linSida.setText("Linhöjder");
+
     nsSida.name = "nsSida";
     nsSida.setText("Normalspann");
 
@@ -74,6 +77,9 @@ void MainWindow::initializeComponent()
 
     efterPanel.name = "efterPanel";
     efterPanel.dock = glaze::Dock::Fill;
+
+    linPanel.name = "linPanel";
+    linPanel.dock = glaze::Dock::Fill;
 
     nsPanel.name = "nsPanel";
     nsPanel.dock = glaze::Dock::Fill;
@@ -285,7 +291,7 @@ void MainWindow::initializeComponent()
     efterKopieraBtn.y = 10;
 
     efterInfo.name = "efterInfo";
-    efterInfo.setText("Kopiera Stolptabell före hit och ändra sedan de stolpar som byggs om. Raderna jämförs med Stolptabell före på Stolpnr: färgen visar om raden är som i före, ändrad eller ny, och tooltipen på en ändrad cell visar värdet i före. Filtret Förändrade ±2 visar bara de förändrade stolparna och två rader runt dem, och resten står ihop i grå rader. Redigering, inklistring och papperskorgen fungerar som i Stolptabell före.");
+    efterInfo.setText("Kopiera Stolptabell före hit och ändra sedan de stolpar som byggs om. Raderna jämförs med Stolptabell före på Stolpnr: färgen visar om raden är som i före, ändrad eller ny, och tooltipen på en ändrad cell visar värdet i före. Filtret Förändrade ±2 visar bara de förändrade stolparna och två rader före och efter dem, och resten står ihop i grå rader. Redigering, inklistring och papperskorgen fungerar som i Stolptabell före.");
     efterInfo.setRole(glaze::Label::Role::Dim);
     efterInfo.setWrap(true);
     efterInfo.anchors = {true, true, true, false};
@@ -446,7 +452,7 @@ void MainWindow::initializeComponent()
     efterFilterDrop.name = "efterFilterDrop";
     efterFilterDrop.setItems({"Förändrade ±2", "Alla"});
     efterFilterDrop.setSelectedIndex(0);
-    efterFilterDrop.setToolTip("Förändrade ±2 visar de stolpar som är ändrade, nya eller borttagna jämfört med Stolptabell före och två rader runt dem. De andra står ihop i grå rader. Alla visar alla stolpar. Valet sparas.");
+    efterFilterDrop.setToolTip("Förändrade ±2 visar de stolpar som är ändrade, nya eller borttagna jämfört med Stolptabell före och två rader före och efter dem. De andra står ihop i grå rader. Alla visar alla stolpar. Valet sparas.");
     efterFilterDrop.width = 150;
     efterFilterDrop.anchorLeft = {"efterFilterLbl", 8};
     efterFilterDrop.anchorTop = {"efterAutoGrp", 8};
@@ -486,6 +492,37 @@ void MainWindow::initializeComponent()
     efterGrid.setColumnEditor(7, {glaze::DataGrid::Editor::Text});
     efterGrid.setColumnEditor(8, {glaze::DataGrid::Editor::Text});
     efterGrid.setColumnEditor(10, {glaze::DataGrid::Editor::Button});
+
+    linRubrik.name = "linRubrik";
+    linRubrik.setText("Linhöjder");
+    linRubrik.setRole(glaze::Label::Role::Heading);
+    linRubrik.x = 16;
+    linRubrik.y = 8;
+
+    linInfo.name = "linInfo";
+    linInfo.setText("Linhöjderna för de ändrade raderna i Stolptabell efter och en rad före och efter dem, uppställda som i Excel. Skriv linhöjden per spann i de vita cellerna under meter, och topplinans Av per stolpe. Ett spann hör till två grannrader och syns i båda blocken, men sparas en gång. Linhöjderna hör till raderna, inte till Stolpnr: en raderad eller tömd rad tar sina värden med sig, och en ny stolpe emellan ger nya, tomma spann. Medelvärdena räknas ut och visas med två decimaler. Allt sparas i projektet.");
+    linInfo.setRole(glaze::Label::Role::Dim);
+    linInfo.setWrap(true);
+    linInfo.anchors = {true, true, true, false};
+    linInfo.x = 16;
+    linInfo.anchorTop = {"linRubrik", 6};
+    linInfo.right = 16;
+
+    linOmrade.name = "linOmrade";
+    linOmrade.setText("Inga stolpar i Stolptabell efter är ändrade mot Stolptabell före, så det finns inga linhöjder att visa.");
+    linOmrade.setWrap(true);
+    linOmrade.anchors = {true, true, true, false};
+    linOmrade.x = 16;
+    linOmrade.anchorTop = {"linInfo", 8};
+    linOmrade.right = 16;
+
+    linBlad.name = "linBlad";
+    linBlad.setBorder(true);
+    linBlad.anchors = {true, true, true, true};
+    linBlad.x = 16;
+    linBlad.anchorTop = {"linOmrade", 8};
+    linBlad.right = 16;
+    linBlad.bottom = 16;
 
     nsRubrik.name = "nsRubrik";
     nsRubrik.setText("Normalspannsberäkningar");
@@ -597,6 +634,7 @@ void MainWindow::initializeComponent()
     efterGrid.onContextMenu = [this](glaze::Widget* s, glaze::ContextMenuArgs& e) { efterGridContextMenu(s, e); };
     efterFilterDrop.onChange = [this](glaze::Widget* s, glaze::ChangeArgs& e) { efterFilterDropChanged(s, e); };
     efterVisaBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { efterVisaBtnClicked(s, e); };
+    linBlad.onCommit = [this](glaze::Widget* s, glaze::ChangeArgs& e) { linBladCommitted(s, e); };
     nsNyBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsNyBtnClicked(s, e); };
     nsAndraBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsAndraBtnClicked(s, e); };
     nsKopieraBtn.onClick = [this](glaze::Widget* s, glaze::ClickArgs& e) { nsKopieraBtnClicked(s, e); };
@@ -620,11 +658,13 @@ void MainWindow::initializeComponent()
     flikar.adopt(byggPmSida);
     flikar.adopt(stolpSida);
     flikar.adopt(efterSida);
+    flikar.adopt(linSida);
     flikar.adopt(nsSida);
     flikar.adopt(lcSida);
     byggPmSida.adopt(byggPmPanel);
     stolpSida.adopt(stolpPanel);
     efterSida.adopt(efterPanel);
+    linSida.adopt(linPanel);
     nsSida.adopt(nsPanel);
     lcSida.adopt(lcPanel);
     byggPmPanel.adopt(byggPmRubrik);
@@ -687,6 +727,10 @@ void MainWindow::initializeComponent()
     efterPanel.adopt(efterVisaBtn);
     efterPanel.adopt(efterFilterInfo);
     efterPanel.adopt(efterGrid);
+    linPanel.adopt(linRubrik);
+    linPanel.adopt(linInfo);
+    linPanel.adopt(linOmrade);
+    linPanel.adopt(linBlad);
     nsPanel.adopt(nsRubrik);
     nsPanel.adopt(nsNyBtn);
     nsPanel.adopt(nsAndraBtn);

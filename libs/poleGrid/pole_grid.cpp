@@ -389,6 +389,12 @@ void PoleGrid::setComparesWithBefore(bool on)
     refreshView();
 }
 
+// Slår på radid: save() ger nya rader id med poletable::assignRowIds före varje sparning.
+void PoleGrid::setRowIds(bool on)
+{
+    rowIds_ = on;
+}
+
 // Byter filter. En öppen cell sparas först, och vyn byggs om direkt. Utan jämförelse gäller All.
 void PoleGrid::setFilter(poleview::Filter filter)
 {
@@ -922,9 +928,12 @@ bool PoleGrid::dirty() const
 }
 
 // Sparar hela tabellen via värden när den skiljer sig från det senast sparade. Vid fel postas en
-// omläsning (så att tabellen inte byggs om mitt i sin egen händelse). Svarar om det lyckades.
+// omläsning (så att tabellen inte byggs om mitt i sin egen händelse). Med radid får nya rader id
+// först, så att raderna i tabellen och i projektet har samma id. Svarar om det lyckades.
 bool PoleGrid::save()
 {
+    if (rowIds_)
+        pt::assignRowIds(rows_);
     const auto toSave = pt::rowsToSave(rows_);
     if (toSave == saved_)
         return true;

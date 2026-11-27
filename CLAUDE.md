@@ -9,7 +9,7 @@ Fönstren ligger i `src/windows/`, stödbiblioteken i `libs/`.
 | Del | Katalog | Innehåll |
 |---|---|---|
 | Projektväljare | `src/windows/project_picker.*` | Startfönstret: de 10 senaste projekten, Öppna, Öppna annat projekt…, Nytt projekt… och Ta bort ur listan, menyerna Arkiv > Avsluta och Hjälp > Om Kalkyl i namnlisten |
-| Huvudfönster | `src/windows/main_window.*` | Programikon (stor med verktygsfält), menyer och lägesknapp i namnlisten, flikarna Dokumentation (uppgifter enligt ByggPM i blått, grönt och gult, beräkningar före i lila och efter i rosa; fas- och topplina kopieras ur linregistret till projektet; högerklick på normalspanns- och linberäkningsraderna; ett nytt projekt får förval), Stolptabell före (redigerbar, Excel-inklistring, decimaler som de skrevs, papperskorg med fråga, sparas i projektet), Stolptabell efter (kopia av före, färger mot före matchade på Stolpnr, filtret Förändrade ±2/Alla med grå rader för dolda stolpar, Visa förändrade och Kopiera från Stolptabell före per cell i snabbmenyn), automatiskt läge i båda stolptabellerna (start och slut per lina, automatiska normalspanns- och linberäkningar i Dokumentation, Gå till tabellen), Normalspann och Linberäkning (alla beräkningar, även lösa; de automatiska först, märkta och låsta), Arkiv > Spara (Ctrl+S), automatisk sparning och statusrad |
+| Huvudfönster | `src/windows/main_window.*` | Programikon (stor med verktygsfält), menyer och lägesknapp i namnlisten, flikarna Dokumentation (uppgifter enligt ByggPM i blått, grönt och gult, beräkningar före i lila och efter i rosa; fas- och topplina kopieras ur linregistret till projektet; högerklick på normalspanns- och linberäkningsraderna; ett nytt projekt får förval), Stolptabell före (redigerbar, Excel-inklistring, decimaler som de skrevs, papperskorg med fråga, sparas i projektet), Stolptabell efter (kopia av före, färger mot före matchade på Stolpnr, filtret Förändrade ±2/Alla med grå rader för dolda stolpar, Visa förändrade och Kopiera från Stolptabell före per cell i snabbmenyn), automatiskt läge i båda stolptabellerna (start och slut per lina, automatiska normalspanns- och linberäkningar i Dokumentation, Gå till tabellen), Linhöjder (ett block per rad i det ändrade området ±1 som Excel-förlagan, linhöjder per spann och topplinans Av på radernas id i Stolptabell efter, sparas i projektet), Normalspann och Linberäkning (alla beräkningar, även lösa; de automatiska först, märkta och låsta), Arkiv > Spara (Ctrl+S), automatisk sparning och statusrad |
 | Lindata | `src/windows/conductor_dialog.*` | Inställningar > Lindata…: redigera linregistret (lägg till, ta bort, återställ startdata) |
 | Normalspann | `src/windows/normal_span_dialog.*` | Formuläret Normalspannsberäkning enligt Normalspannberäkning.xlsm: tabell med Stpnr, spannlängd och H som i Excel (urklipp, markering), resultat och kontrollerna 1–5; visar en automatisk beräkning skrivskyddad |
 | Linberäkning | `src/windows/line_calc_dialog.*` | Formuläret Linberäkning som arket: Indata, Lindata/Konstanter och Lastfall med Resultat och Data till SAG, korsningsmallarna, lägena Ny och Excel med skillnadsmarkering, kopplad (indata ur Dokumentation) eller manuell; visar en automatisk beräkning skrivskyddad |
@@ -17,9 +17,11 @@ Fönstren ligger i `src/windows/`, stödbiblioteken i `libs/`.
 | PM Excel-arket | `src/windows/line_calc_info_dialog.*` | Visar PM:et om felen i Excel-arket (`res/linberakning_excel.md`), öppnas med i-knappen vid läget Ny |
 | Normalspann | `libs/anCalc` | Normalspannsberäkningen som rena funktioner |
 | Tabelltext | `libs/tableText` | Tal med decimalkomma, kanonisk decimaltext (decimalerna som de skrevs), tabbseparerat urklipp och inklistring |
-| Stolptabell | `libs/poleTable` | Stolptabellens radmodell: kolumnerna, talen som decimaltext, visning, urklipp och ändringar |
+| Stolptabell | `libs/poleTable` | Stolptabellens radmodell: kolumnerna, talen som decimaltext, visning, urklipp och ändringar, och radernas id i Stolptabell efter (`PoleRow::id`, `assignRowIds`) |
+| Linhöjder | `libs/lineHeight` | Fliken Linhöjder som rena funktioner: spannen på radernas id, blocken, medelvärdena (exakt i decimaltext), det som ska stå kvar när efter ändras, bladets celler, färger och texter |
+| Linhöjdsbladet | `libs/lineHeightSheet` | `LineHeightSheet`: linhöjdsbladet som egen GlazeUI-widget (OBJECT-bibliotek, ritas också av glaze-render i verktygsbygget) |
 | Automatiskt läge | `libs/autoMode` | Sträckorna i stolptabellen, normalspannets stolpar, panelens text, dubbletter, jämförelsen mellan Stolptabell före och efter och återställningen av en cell ur före som rena funktioner |
-| Vyn av Stolptabell efter | `libs/poleView` | Filtret Förändrade ±2, de grå raderna, rullningsmålet för Visa förändrade och infotexten som rena funktioner |
+| Vyn av Stolptabell efter | `libs/poleView` | Filtret Förändrade ±2 och det ändrade området, de grå raderna, rullningsmålet för Visa förändrade och infotexten som rena funktioner |
 | Importera stolptabell | `src/windows/pole_import_dialog.*` | Stolptabell före > Importera stolptabell…: läser en stolptabell från Banken (.xlsx/.xlsm), visar kolumnvalet per fält med säkerhet, Från–Till och förhandsvisning, och ersätter bara raderna i Stolptabell före |
 | Excelfiler | `libs/xlsx` | Celler, delade strängar, talformat och sammanslagningar ur .xlsx och .xlsm med miniz och en egen XML-läsare, utan makron |
 | Stolptabellsimport | `libs/poleImport` | Rubrikområdet, kolumnigenkänningen på rubrikerna (poäng, nära varianter, inlärda val), utdraget och rådataposten som rena funktioner |
@@ -32,7 +34,7 @@ Fönstren ligger i `src/windows/`, stödbiblioteken i `libs/`.
 | Plattform | `libs/platform` | Text (UTF-8/UTF-16), system, filer, låsfil och filassociation (Win32) |
 | Databas | `libs/db` | SQLite-anslutning, satser och migrering |
 | Systemdatabas | `libs/systemdb` | Utseendeläge, senaste mapp, senaste projekt, linregistret, automatisk sparning, importmappen, de inlärda kolumnvalen för importen och filtret i Stolptabell efter, lokalt per användare |
-| Projektdatabas | `libs/projectdb` | Projektfilen `.kalkyl`: lokal arbetskopia, lås och säker publicering; Dokumentation, linkopior, Stolptabell före och efter, automatiskt läge med de lagrade automatiska beräkningarna (`auto_calc`, synkade i samma transaktion), importens rådata (`pole_import*`), normalspanns- och linberäkningar och upplösningen av kopplade linberäkningar (`project_data.*`) |
+| Projektdatabas | `libs/projectdb` | Projektfilen `.kalkyl`: lokal arbetskopia, lås och säker publicering; Dokumentation, linkopior, Stolptabell före och efter, automatiskt läge med de lagrade automatiska beräkningarna (`auto_calc`, synkade i samma transaktion), importens rådata (`pole_import*`), radernas id i Stolptabell efter (`row_id`) och linhöjderna per spann och topplinans Av på radernas id (`line_height_*`), normalspanns- och linberäkningar och upplösningen av kopplade linberäkningar (`project_data.*`) |
 | Utseende | `libs/appearance` | Slate, temat Windows och lägesknappen, gemensamt för alla toppfönster |
 | Resurser | `res` | Programikonen (källa, `assets.bin`, `kalkyl.ico`) och PM:et `linberakning_excel.md`, som byggs in i kalkyl.exe |
 | Tester | `tests` | Alla tester (ctest) och deras facit |
@@ -69,6 +71,7 @@ cmake --build --preset debug
   - `test` bygger testerna i `tests/` (`KALKYL_TESTS=ON`) i `build-test/`. Kör dem med `ctest --preset test`, som kör åtta tester parallellt. Varje test skriver i en egen tillfällig mapp, så de krockar inte.
 - Byter man generator i en befintlig byggkatalog måste hela katalogen tas bort, även `_deps/`.
 - Förhandsgranska ett fönster: `build-tools/_deps/glazeui-build/apps/glaze-render/glaze-render.exe src/windows/main_window.h -o bild.png`.
+  Linhöjdsbladet (`LineHeightSheet`) ritas på riktigt bara av glaze-render ur presetet `tools`, och VS Code visar en ruta med klassnamnet.
 
 ## Driftsättning
 
@@ -103,6 +106,7 @@ Strukturen är fast. Nya filer läggs där de hör hemma.
   Projektet sparar Dokumentationens värden, en kopia av varje använd lina, Stolptabell före och efter (talen som text med användarens decimaler, och i efter Av Fas1, Fas2 och Fas3, som får Av ur före vid kopieringen), inställningen för automatiskt läge (läget och start och slut per lina och stolptabell), normalspannsberäkningarna och linberäkningarna.
   De automatiska beräkningarna sparas som vanliga beräkningar med stabila id, märkta i `auto_calc`. `projectdb` håller dem aktuella i samma transaktion som varje ändring de bygger på.
   En import av en stolptabell sparar också rådata (alla kolumner för de importerade raderna, rubrikerna och filens namn) i `pole_import*`. En ny import ersätter dem, och handändringar rör dem inte.
+  Raderna i Stolptabell efter har ett stabilt id (`row_id`). Linhöjderna i fliken Linhöjder (per spann mellan två rader och topplinans Av per rad) sparas på radernas id i `line_height_*`, följer raderna i efter och tas bort med dem i samma transaktion. Kopiera från Stolptabell före… tar bort alla linhöjder.
   En kopplad linberäkning sparar inte linan, aₙ, σ₀, min och max, utan hämtar dem ur Dokumentation vid varje omräkning.
 - Avinstallationen rör aldrig systemdatabasen, arbetskopiorna eller projektfilerna.
 - `.kalkyl` associeras per användare med Kalkyl (`kalkyl.exe --registrera` och `--avregistrera`).

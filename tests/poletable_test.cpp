@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -246,10 +247,65 @@ void testFirstInvalidColumn()
     CHECK(!firstInvalidColumn(row));
 }
 
+// Radens id: assignRowIds ger nästa lediga id i tabellens ordning, id:t är inget fält och syns
+// därför aldrig i urklipp, visning eller tömningen av raden, och det följer raden genom ändringar.
+void testRowIds()
+{
+    const auto withId = [](std::int64_t id) {
+        PoleRow r;
+        r.id = id;
+        return r;
+    };
+    std::vector<PoleRow> rows = {withId(0), withId(3), withId(0), withId(3), withId(-1)};
+    assignRowIds(rows);
+    CHECK(rows[0].id == 4 && rows[1].id == 3 && rows[2].id == 5 && rows[3].id == 6 && rows[4].id == 7);
+
+    std::vector<PoleRow> valid = {withId(2), withId(7), withId(4)};
+    const std::vector<PoleRow> sameValid = valid;
+    assignRowIds(valid);
+    CHECK(valid == sameValid);
+    std::vector<PoleRow> none;
+    assignRowIds(none);
+    CHECK(none.empty());
+
+    // Ett id är inget fält: en rad med bara id är tom, och fälten 0-9 visar det aldrig.
+    PoleRow idOnly = withId(12);
+    CHECK(isEmptyRow(idOnly));
+    for (int c = 0; c < kFieldCount; ++c) {
+        CHECK(field(idOnly, c).empty());
+        CHECK(displayText(idOnly, c).empty() && copyText(idOnly, c).empty());
+    }
+    CHECK(!acceptField(kFieldCount, "12"));
+    CHECK(!firstInvalidColumn(idOnly));
+
+    // id står med i jämförelsen, så två rader med samma fält men olika id är olika.
+    PoleRow a = poleOnly("A");
+    PoleRow b = poleOnly("A");
+    b.id = 3;
+    CHECK(!(a == b));
+
+    // applyEdits behåller id:t i en befintlig rad och ger nya rader id 0.
+    std::vector<PoleRow> edited = {poleOnly("A")};
+    edited[0].id = 7;
+    applyEdits(edited, {{0, kNorth, "1.5"}, {2, kPole, "C"}});
+    CHECK(edited.size() == 3 && edited[0].id == 7 && edited[0].north == "1.5");
+    CHECK(edited[1].id == 0 && edited[2].id == 0);
+
+    // trimTrailingEmptyRows och rowsToSave behåller id:na på raderna som står kvar.
+    std::vector<PoleRow> trailing = {poleOnly("A"), withId(9), poleOnly("B"), withId(10)};
+    trailing[0].id = 1;
+    trailing[2].id = 3;
+    const std::vector<PoleRow> saved = rowsToSave(trailing);
+    CHECK(saved.size() == 3 && saved[0].id == 1 && saved[1].id == 9 && saved[2].id == 3);
+    trimTrailingEmptyRows(trailing);
+    CHECK(trailing == saved);
+}
+
 } // namespace
 
 int main()
 {
+    testRowIds();
     testAcceptField();
     testDisplayAndNumber();
     testFieldAndNames();

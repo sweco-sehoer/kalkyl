@@ -8,7 +8,7 @@ Det beror på `tableText` och delas av `projectdb` (lagringen och valideringen),
 | Fil | Innehåll |
 |---|---|
 | `CMakeLists.txt` | Biblioteket `kalkyl_poletable` (testet `poletable` ligger i `tests/`) |
-| `pole_table.h` | Fältkonstanterna `kPole`…`kLkl`, `kAv2`, `kAv3`, `kColumnCount` och `kFieldCount`, `PoleRow`, `beforeField`, `beforeColumns`, `afterColumns`, `afterColumnName` (Av heter "Av Fas1" i efter), `isNumberColumn`, `columnName`, `field`, `isEmptyRow`, `normalizeLkl`, `acceptField`, `displayText`, `copyText`, `numberValue`, `firstInvalidColumn`, `Edit`, `applyEdits`, `trimTrailingEmptyRows` och `rowsToSave` |
+| `pole_table.h` | Fältkonstanterna `kPole`…`kLkl`, `kAv2`, `kAv3`, `kColumnCount` och `kFieldCount`, `PoleRow`, `beforeField`, `beforeColumns`, `afterColumns`, `afterColumnName` (Av heter "Av Fas1" i efter), `isNumberColumn`, `columnName`, `field`, `isEmptyRow`, `normalizeLkl`, `acceptField`, `displayText`, `copyText`, `numberValue`, `firstInvalidColumn`, `Edit`, `applyEdits`, `trimTrailingEmptyRows`, `rowsToSave` och `assignRowIds` |
 | `pole_table.cpp` | Implementationen, och konstanten `kGroupThousands` för tusentalsgrupperingen i visningen |
 | `import_record.h` | Bara typer: rådata för en import av en stolptabell (`ImportCellKind`, `ImportCell`, `ImportRow`, `ImportColumn` och `ImportRecord`). `poleImport` bygger posten, `projectdb` sparar och läser den och fönstret skickar den vidare |
 
@@ -26,5 +26,9 @@ Det beror på `tableText` och delas av `projectdb` (lagringen och valideringen),
 - **Visning och urklipp:** `displayText` har decimalkomma och grupperar heltalsdelen med hårt mellanslag när `kGroupThousands` är sant.
   `copyText` grupperar aldrig, så att Excel läser talet.
 - **Stolpnr** trimmas med `tabletext::trimmed` (ASCII-blanktecken i början och slutet), annars inga regler.
+- **Radens id** (`PoleRow::id`, `std::int64_t`) är inget fält: det ingår inte i `kFieldCount`, `field`, `isEmptyRow`, `acceptField`, `displayText`, `copyText`, `firstInvalidColumn` eller `applyEdits`, och hamnar därför aldrig i urklippet eller i jämförelsen mot före.
+  Det används bara i Stolptabell efter (> 0 och unikt i tabellen, 0 = inget id än) och är alltid 0 i före. Linhöjderna hänger på det.
+  `operator==` på `PoleRow` tar med id:t. `applyEdits` ger nya rader bortom slutet id 0 och låter id:t i en befintlig rad stå kvar, och `rowsToSave` och `trimTrailingEmptyRows` behåller id:na.
+  `assignRowIds` ger varje rad med id ≤ 0, eller med ett id som redan stått tidigare i listan, nästa lediga id (högsta id + 1) i tabellens ordning och rör inget annat.
 - **Tomma rader:** `rowsToSave` behåller tomma rader mitt i tabellen och tar bara bort tomma rader sist.
   `applyEdits` lägger till tomma rader fram till en ändrad rad bortom slutet.

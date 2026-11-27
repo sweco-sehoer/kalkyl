@@ -511,12 +511,14 @@ void MainWindow::onLoad(glaze::Widget*, glaze::EventArgs&)
     // Stolptabell efter jämförs med före, och filtret är det sparade valet. Rullistan och
     // knappen släcks inte skrivskyddat, eftersom de bara ändrar visningen.
     afterGrid_->setComparesWithBefore(true);
+    afterGrid_->setRowIds(true);
     applyAfterFilter(viewFilterOf(sys_->afterFilter()), false, false);
 
     // Skrivskyddat: rutorna, rullistorna och knapparna släcks, och tabellerna låses.
     if (readOnly()) {
         beforeGrid_->setReadOnly(true);
         afterGrid_->setReadOnly(true);
+        linBlad.setReadOnly(true);
         for (AutoPanel* panel : {&beforePanel_, &afterPanel_}) {
             panel->check->disable();
             for (glaze::Dropdown* drop : panel->drops)
@@ -784,13 +786,75 @@ std::vector<kalkyl::automode::NamedRange> MainWindow::namedRanges(Stage stage) c
 }
 
 // Läser om de automatiska beräkningarna ur projektet och uppdaterar allt som visar dem:
-// Dokumentation och flikarna Normalspann och Linberäkning, panelerna och tabellernas färger.
+// Dokumentation och flikarna Normalspann och Linberäkning, panelerna, tabellernas färger och
+// fliken Linhöjder.
 void MainWindow::refreshAutomatic()
 {
     refreshNormalSpans();
     refreshLineCalcs();
     updateAutoPanels();
     updatePoleLooks();
+    refreshLineHeights();
+}
+
+// Bygger fliken Linhöjder: blocken för det ändrade området ur stolptabellerna och de sparade
+// linhöjderna, områdestexten och bladet. Utan block döljs bladet och bara texten visas.
+void MainWindow::refreshLineHeights()
+{
+    kalkyl::lineheight::StoredHeights stored;
+    if (auto read = kalkyl::projectdb::lineHeights(*project_)) {
+        stored = std::move(read).value();
+    } else {
+        gfx::log("Linhöjderna kunde inte läsas: %s", read.error().detail.c_str());
+        setPoleStatus("Linhöjderna kunde inte läsas: " + read.error().message);
+    }
+    const auto& before = beforeGrid_->rows();
+    const auto& after = afterGrid_->rows();
+    const auto blocks = kalkyl::lineheight::buildBlocks(before, after, stored);
+    linOmrade.setText(kalkyl::lineheight::areaText(before, after, blocks));
+    linBlad.setSheet(kalkyl::lineheight::buildSheet(blocks));
+    if (blocks.empty())
+        linBlad.hide();
+    else
+        linBlad.show();
+}
+
+// Linhöjdsbladet sparade en cell. Texten kontrolleras och skrivs i projektet som en del av ett
+// spann eller som topplinans Av, och bladet räknas om. Ogiltig text och ett spann eller en rad som
+// hunnit försvinna visas i statusraden, andra fel i en ruta.
+void MainWindow::linBladCommitted(glaze::Widget*, glaze::ChangeArgs&)
+{
+    if (readOnly())
+        return;
+    namespace lh = kalkyl::lineheight;
+    const auto commit = linBlad.lastCommit();
+    const bool topAv = commit.input.kind == lh::InputRef::Kind::TopAv;
+    if (!topAv && commit.input.kind != lh::InputRef::Kind::Span)
+        return;
+
+    const auto value = topAv ? lh::acceptAv(commit.text) : lh::acceptHeight(commit.text);
+    if (!value) {
+        setPoleStatus(topAv ? "Topplinans Av måste vara ett tal, till exempel 265,9. Värdet ändrades inte."
+                            : "Linhöjden måste vara ett tal som är 0 eller större, till exempel 12,3. Värdet ändrades inte.");
+        refreshLineHeights();
+        return;
+    }
+
+    const auto saved = topAv ? kalkyl::projectdb::setTopAv(*project_, commit.input.row, *value)
+                             : kalkyl::projectdb::setSpanHeight(*project_, commit.input.span, commit.input.part, *value);
+    if (!saved) {
+        if (saved.error().code == kalkyl::core::ErrorCode::NotFound) {
+            setPoleStatus(saved.error().message);
+        } else {
+            gfx::log("Linhöjden kunde inte sparas: %s", saved.error().detail.c_str());
+            glaze::messageBox(*this, "Linhöjden kunde inte sparas." + kNl + saved.error().message, "Kalkyl",
+                              glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Error);
+        }
+        refreshLineHeights();
+        return;
+    }
+    updateTitle();
+    refreshLineHeights();
 }
 
 // Fyller panelen Automatiskt läge för båda skedena.
@@ -1092,11 +1156,18 @@ void MainWindow::copyBeforeToAfterAsked()
             else if (c.state == kalkyl::automode::RowState::New)
                 ++added;
         }
+        // Finns linhöjder tas de bort av kopieringen, och frågan säger det.
+        bool hasHeights = false;
+        if (const auto heights = kalkyl::projectdb::lineHeights(*project_))
+            hasHeights = !heights.value().spans.empty() || !heights.value().topAv.empty();
+        else
+            gfx::log("Linhöjderna kunde inte läsas: %s", heights.error().detail.c_str());
         const std::string text =
             "Ersätta Stolptabell efter med en kopia av Stolptabell före?" + kNl + kNl + "Stolptabell efter har " +
             std::to_string(after.size()) + " rader, varav " + std::to_string(changed) + " ändrade och " +
             std::to_string(added) + " nya jämfört med före. De ersätts av före-tabellens " +
-            std::to_string(before.size()) + " rader, och start och slut och automatiskt läge blir som i före.";
+            std::to_string(before.size()) + " rader, och start och slut och automatiskt läge blir som i före." +
+            (hasHeights ? " Linhöjderna i fliken Linhöjder tas bort." : "");
         if (glaze::messageBox(*this, text, "Kopiera från Stolptabell före", glaze::MessageBoxButtons::YesNo,
                               glaze::MessageBoxType::Warning) != glaze::DialogResult::Yes)
             return;

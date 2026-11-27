@@ -31,6 +31,9 @@
 - 💡 Fler Excel-facit för linberäkningen: testfallen T2 och T11–T16 i doc/plans/archive/2026-11-25_Linberakning.md, 6.4
   (D1, korsningsmall med ändrad min/max, manuell last) som tester i `tests/`, som E1–E10.
 - 💡 Sammanslagning (Sammanslagning.xlsm) som egen beräkningsmodul.
+- 💡 Linhöjd faslina för linberäkning (fliken Linhöjder) som indata till Linberäkningens fält "Linhöjd, snitt (m)".
+  Se doc/plans/archive/2026-11-27_Linhojder.md, fråga 6.
+- 💡 Fliken Linhöjder: inklistring av flera celler och en snabbmeny med Gå till Stolptabell efter.
 - 💡 GlazeUI: ett val för talceller i DataGrid som visar talet med de decimaler som skrevs. Då kan Stolptabell före
   svälja bokstäver redan vid tangenttrycket. Se doc/plans/archive/2026-11-26_Stolptabell_fore.md, 3.2.
 - 💡 GlazeUI: en publik fråga om cellen (rad och kolumn) under en punkt i DataGrid, så att `GridProbe` i `libs/poleGrid` kan tas bort.

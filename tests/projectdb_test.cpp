@@ -517,23 +517,24 @@ bool publishNow(projectdb::ProjectDb& p)
     return true;
 }
 
-// SQL-frågan som räknar de sjutton tabellerna i schemat.
-const char* const kSeventeenTablesSql =
+// SQL-frågan som räknar de nitton tabellerna i schemat.
+const char* const kNineteenTablesSql =
     "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('project', "
     "'project_conductor', 'doc_value', 'normal_span', 'normal_span_pole', 'doc_normal_span', "
     "'line_calc', 'line_calc_case', 'doc_line_calc', 'pole_before', 'pole_after', 'auto_mode', "
-    "'auto_calc', 'pole_import', 'pole_import_column', 'pole_import_row', 'pole_import_cell')";
+    "'auto_calc', 'pole_import', 'pole_import_column', 'pole_import_row', 'pole_import_cell', "
+    "'line_height_span', 'line_height_pole')";
 
-// Ett nytt projekt har alla sjutton tabellerna i schemat.
+// Ett nytt projekt har alla nitton tabellerna i schemat.
 void testSchemaTables()
 {
     auto created = projectdb::ProjectDb::create(join(g_share, "Tabeller.kalkyl"), "Tabeller", options());
     CHECK(created.ok());
     if (!created.ok())
         return;
-    CHECK(countIn(created.value(), kSeventeenTablesSql) == 17);
+    CHECK(countIn(created.value(), kNineteenTablesSql) == 19);
     CHECK(countIn(created.value(), "PRAGMA user_version") == projectdb::kSchemaVersion);
-    CHECK(projectdb::kSchemaVersion == 7);
+    CHECK(projectdb::kSchemaVersion == 8);
 }
 
 // Skapar en projektfil med bara tabellen project, som i v0.1.0, och angiven user_version.
@@ -574,7 +575,7 @@ void testMigrateFromV010()
         CHECK(p.info().createdUtc == "2026-11-23T12:00:00Z");
         CHECK(p.info().createdWith == "Kalkyl 0.1.0");
         CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
-        CHECK(countIn(p, kSeventeenTablesSql) == 17);
+        CHECK(countIn(p, kNineteenTablesSql) == 19);
         CHECK(projectdb::setDocValue(p, {"temp_max", "45", "Migrerad"}).ok());
         CHECK(publishNow(p));
         p.close();
@@ -1206,7 +1207,7 @@ void testMigrateFromV020()
         }
         projectdb::ProjectDb& p = opened.value();
         CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
-        CHECK(countIn(p, kSeventeenTablesSql) == 17);
+        CHECK(countIn(p, kNineteenTablesSql) == 19);
         checkV020Data(p);
 
         auto none = projectdb::lineCalcs(p);
@@ -1260,6 +1261,23 @@ std::vector<poletable::PoleRow> tenDecimalRows()
     return {poleRow("ST0378", "363", "362", "348", "6512240.8500000000", "412181.98", "44.19", "255/262"),
             poleRow("Åkerö-ÄÖ", "", "-12.5", "0", "", "", "", ""),
             poleRow("ST0381", "44.10", "", "", "6511247.0800000000", "411804.35", "30.01", "262/262")};
+}
+
+// Raderna med id 1, 2, 3 ... i tabellens ordning: det Stolptabell efter ger tillbaka när alla rader
+// saknade id vid sparningen.
+std::vector<poletable::PoleRow> withIds(std::vector<poletable::PoleRow> rows)
+{
+    for (std::size_t i = 0; i < rows.size(); ++i)
+        rows[i].id = static_cast<std::int64_t>(i) + 1;
+    return rows;
+}
+
+// Raderna med id 0, för jämförelser av fälten.
+std::vector<poletable::PoleRow> withoutIds(std::vector<poletable::PoleRow> rows)
+{
+    for (poletable::PoleRow& row : rows)
+        row.id = 0;
+    return rows;
 }
 
 // Sparar och läser tillbaka Stolptabell före: en ny tabell är tom, alla fält kommer tillbaka
@@ -1527,8 +1545,9 @@ void testPolesAfterRoundTrip()
     auto back = projectdb::poles(p, Stage::After);
     CHECK(back.ok());
     if (back.ok()) {
-        const std::vector<poletable::PoleRow> expected = {rows[0], rows[1], rows[2], rows[3]};
+        const std::vector<poletable::PoleRow> expected = withIds({rows[0], rows[1], rows[2], rows[3]});
         CHECK(back.value() == expected);
+        CHECK(withoutIds(back.value()) == std::vector<poletable::PoleRow>({rows[0], rows[1], rows[2], rows[3]}));
     }
     CHECK(countIn(p, "SELECT count(*) FROM pole_after") == 4);
     CHECK(countIn(p, "SELECT count(*) FROM pole_after WHERE position = 0 AND "
@@ -1642,7 +1661,7 @@ void testCopyBeforeToAfter()
         row.av2 = row.av;
         row.av3 = row.av;
     }
-    CHECK(after.ok() && after.value() == copied);
+    CHECK(after.ok() && after.value() == withIds(copied));
     auto before = projectdb::polesBefore(p);
     CHECK(before.ok() && before.value() == annexRows());
     auto afterSettings = projectdb::autoSettings(p, Stage::After);
@@ -2260,7 +2279,7 @@ void testMigrateFromV040()
         }
         projectdb::ProjectDb& p = opened.value();
         CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
-        CHECK(countIn(p, kSeventeenTablesSql) == 17);
+        CHECK(countIn(p, kNineteenTablesSql) == 19);
         CHECK(countIn(p, "SELECT count(*) FROM pole_import") == 0);
         {
             auto none = projectdb::lastPoleImport(p);
@@ -2354,7 +2373,7 @@ INSERT INTO auto_mode(stage, enabled, phase_from, phase_to) VALUES ('before', 0,
     }
     projectdb::ProjectDb& p = opened.value();
     CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
-    CHECK(countIn(p, kSeventeenTablesSql) == 17);
+    CHECK(countIn(p, kNineteenTablesSql) == 19);
     CHECK(countIn(p, "SELECT count(*) FROM pole_import_cell") == 0);
     auto none = projectdb::lastPoleImport(p);
     CHECK(none.ok() && !none.value().has_value());
@@ -2402,7 +2421,7 @@ VALUES (0, 'ST0378', '363', NULL, '348', NULL, NULL, '44.19', '255/262'),
     }
     projectdb::ProjectDb& p = opened.value();
     CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
-    CHECK(countIn(p, kSeventeenTablesSql) == 17);
+    CHECK(countIn(p, kNineteenTablesSql) == 19);
     checkV040Data(p, false);
     auto after = projectdb::poles(p, Stage::After);
     CHECK(after.ok() && after.value().size() == 2);
@@ -2534,7 +2553,7 @@ void testMigrateFromV030()
         }
         projectdb::ProjectDb& p = opened.value();
         CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
-        CHECK(countIn(p, kSeventeenTablesSql) == 17);
+        CHECK(countIn(p, kNineteenTablesSql) == 19);
         checkV030Data(p);
         auto none = projectdb::polesBefore(p);
         CHECK(none.ok() && none.value().empty());
@@ -3397,6 +3416,9 @@ void testReadOnlyWrites()
     CHECK(projectdb::copyBeforeToAfter(p).error().code == ErrorCode::AccessDenied);
     CHECK(projectdb::importPolesBefore(p, tenDecimalRows(), sampleRecord(tenDecimalRows())).error().code ==
           ErrorCode::AccessDenied);
+    CHECK(projectdb::setSpanHeight(p, lineheight::spanKey(1, 2), lineheight::Part::Outer, "12.3").error().code ==
+          ErrorCode::AccessDenied);
+    CHECK(projectdb::setTopAv(p, 1, "265.9").error().code == ErrorCode::AccessDenied);
     CHECK(!p.isModified());
     CHECK(p.revision() == 0);
     auto spans = projectdb::normalSpans(p);
@@ -3621,9 +3643,375 @@ void testRevision()
     CHECK(projectdb::copyBeforeToAfter(p).ok());
     CHECK(p.revision() == 6);
 
+    // Linhöjderna är skrivningar med en uppräkning var. En vägrad skrivning räknar inte upp.
+    CHECK(projectdb::setSpanHeight(p, lineheight::spanKey(1, 2), lineheight::Part::Outer, "12.3").ok());
+    CHECK(p.revision() == 7);
+    CHECK(projectdb::setTopAv(p, 2, "265.9").ok());
+    CHECK(p.revision() == 8);
+    CHECK(!projectdb::setSpanHeight(p, lineheight::spanKey(1, 3), lineheight::Part::Outer, "1").ok());
+    CHECK(p.revision() == 8);
+
     // Importen av en stolptabell är en skrivning, med synkningen i samma transaktion.
     CHECK(projectdb::importPolesBefore(p, tenDecimalRows(), sampleRecord(tenDecimalRows())).ok());
-    CHECK(p.revision() == 7);
+    CHECK(p.revision() == 9);
+}
+
+// ---- Radernas id och linhöjderna ----
+
+// Tolv stolpar ST0374–ST0385 med Av, Av Fas2, Av Fas3 och H, utan id.
+std::vector<poletable::PoleRow> twelveRows()
+{
+    std::vector<poletable::PoleRow> rows;
+    for (int i = 0; i < 12; ++i) {
+        poletable::PoleRow row = poleRow(("ST0" + std::to_string(374 + i)).c_str(), "300", "", "", "", "", "140", "");
+        row.av2 = "300";
+        row.av3 = "300";
+        rows.push_back(row);
+    }
+    return rows;
+}
+
+// Linhöjderna som de ligger i projektet.
+lineheight::StoredHeights storedOf(projectdb::ProjectDb& p)
+{
+    auto s = projectdb::lineHeights(p);
+    CHECK(s.ok());
+    return s.ok() ? s.value() : lineheight::StoredHeights{};
+}
+
+// Sant när spannet finns med exakt de tre värdena.
+bool hasSpan(const lineheight::StoredHeights& s, std::int64_t a, std::int64_t b, const std::string& outer,
+             const std::string& middle, const std::string& top)
+{
+    const auto it = s.spans.find(lineheight::spanKey(a, b));
+    return it != s.spans.end() && it->second == lineheight::SpanHeights{outer, middle, top};
+}
+
+// Raderna i Stolptabell efter med sina id, eller en tom lista.
+std::vector<poletable::PoleRow> afterRows(projectdb::ProjectDb& p)
+{
+    auto rows = projectdb::poles(p, Stage::After);
+    CHECK(rows.ok());
+    return rows.ok() ? rows.value() : std::vector<poletable::PoleRow>{};
+}
+
+// Radernas id i Stolptabell efter: rader utan id får nästa lediga i tabellens ordning, givna id
+// står kvar efter omöppning, dubbletter får nya, före har alltid id 0, indexet finns och
+// kopieringen från före ger position + 1 och tömmer linhöjderna.
+void testRowIds()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Radid", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+
+    std::vector<poletable::PoleRow> rows = {poleRow("A", "1", "", "", "", "", "", ""), poleRow("B", "2", "", "", "", "", "", ""),
+                                            poleRow("C", "3", "", "", "", "", "", ""), poleRow("D", "4", "", "", "", "", "", "")};
+    rows[0].id = 5;
+    rows[2].id = 9;
+    CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+    std::vector<poletable::PoleRow> back = afterRows(p);
+    CHECK(back.size() == 4);
+    if (back.size() == 4) {
+        CHECK(back[0].id == 5 && back[1].id == 10 && back[2].id == 9 && back[3].id == 11);
+        CHECK(back[1].pole == "B" && back[3].pole == "D");
+    }
+
+    // Ett dubblerat id får ett nytt, det första står kvar.
+    rows[1].id = 5;
+    rows[3].id = 9;
+    CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+    back = afterRows(p);
+    if (back.size() == 4) {
+        CHECK(back[0].id == 5 && back[2].id == 9);
+        CHECK(back[1].id == 10 && back[3].id == 11);
+    }
+
+    // Före har alltid id 0, också när raderna skickas med id.
+    std::vector<poletable::PoleRow> beforeRows = rows;
+    beforeRows[0].id = 7;
+    CHECK(projectdb::setPolesBefore(p, beforeRows).ok());
+    auto before = projectdb::polesBefore(p);
+    CHECK(before.ok() && before.value().size() == 4);
+    if (before.ok())
+        for (const poletable::PoleRow& row : before.value())
+            CHECK(row.id == 0);
+    CHECK(countIn(p, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'pole_after_row_id'") == 1);
+
+    // Givna id står kvar efter publicering och omöppning.
+    const std::vector<poletable::PoleRow> expected = afterRows(p);
+    CHECK(publishNow(p));
+    const std::string path = p.path();
+    p.close();
+    auto reopened = projectdb::ProjectDb::open(path, options());
+    CHECK(reopened.ok());
+    if (!reopened.ok())
+        return;
+    CHECK(afterRows(reopened.value()) == expected);
+
+    // Kopieringen från före ger id = position + 1 och tömmer linhöjderna.
+    CHECK(projectdb::setSpanHeight(reopened.value(), lineheight::spanKey(5, 10), lineheight::Part::Outer, "12.3").ok());
+    CHECK(projectdb::setTopAv(reopened.value(), 9, "265.9").ok());
+    CHECK(countIn(reopened.value(), "SELECT count(*) FROM line_height_span") == 1);
+    CHECK(countIn(reopened.value(), "SELECT count(*) FROM line_height_pole") == 1);
+    CHECK(projectdb::copyBeforeToAfter(reopened.value()).ok());
+    const std::vector<poletable::PoleRow> copied = afterRows(reopened.value());
+    CHECK(copied.size() == 4);
+    for (std::size_t i = 0; i < copied.size(); ++i)
+        CHECK(copied[i].id == static_cast<std::int64_t>(i) + 1);
+    CHECK(countIn(reopened.value(), "SELECT count(*) FROM line_height_span") == 0);
+    CHECK(countIn(reopened.value(), "SELECT count(*) FROM line_height_pole") == 0);
+    CHECK(storedOf(reopened.value()) == lineheight::StoredHeights{});
+}
+
+// Linhöjderna: tur och retur för de tre delarna och topplinans Av, borttagning med tom text,
+// Invalid och NotFound utan ändring, och att ett spann går förbi en helt tom rad.
+void testLineHeights()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Linhöjder", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+    CHECK(storedOf(p) == lineheight::StoredHeights{});
+
+    // Rad 3 (id 3) är helt tom, så spannen går förbi den: {2, 4} i stället för {2, 3} och {3, 4}.
+    std::vector<poletable::PoleRow> rows = twelveRows();
+    rows[2] = poletable::PoleRow{};
+    CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+    CHECK(afterRows(p).size() == 12 && afterRows(p)[2].id == 3);
+    CHECK(storedOf(p) == lineheight::StoredHeights{});
+
+    using lineheight::Part;
+    using lineheight::spanKey;
+    CHECK(projectdb::setSpanHeight(p, spanKey(5, 6), Part::Outer, "12.33").ok());
+    CHECK(projectdb::setSpanHeight(p, spanKey(5, 6), Part::Middle, "12.33").ok());
+    CHECK(projectdb::setSpanHeight(p, spanKey(5, 6), Part::Top, "22.63").ok());
+    CHECK(projectdb::setSpanHeight(p, spanKey(6, 7), Part::Outer, "21.2").ok());
+    CHECK(projectdb::setSpanHeight(p, spanKey(7, 6), Part::Middle, "21.2").ok());
+    CHECK(projectdb::setSpanHeight(p, spanKey(6, 7), Part::Top, "31.17").ok());
+    CHECK(projectdb::setSpanHeight(p, spanKey(2, 4), Part::Outer, "0").ok());
+    CHECK(projectdb::setTopAv(p, 6, "265.9332").ok());
+    CHECK(projectdb::setTopAv(p, 7, "-3.5").ok());
+
+    const auto check = [&](projectdb::ProjectDb& q) {
+        const lineheight::StoredHeights s = storedOf(q);
+        CHECK(s.spans.size() == 3);
+        CHECK(hasSpan(s, 5, 6, "12.33", "12.33", "22.63"));
+        CHECK(hasSpan(s, 6, 7, "21.2", "21.2", "31.17"));
+        CHECK(hasSpan(s, 2, 4, "0", "", ""));
+        CHECK(s.topAv.size() == 2 && s.topAv.at(6) == "265.9332" && s.topAv.at(7) == "-3.5");
+    };
+    check(p);
+    CHECK(publishNow(p));
+    const std::string path = p.path();
+    p.close();
+    auto reopened = projectdb::ProjectDb::open(path, options());
+    CHECK(reopened.ok());
+    if (!reopened.ok())
+        return;
+    projectdb::ProjectDb& q = reopened.value();
+    check(q);
+
+    // Tom text tar bort värdet, och ett spann utan värden försvinner ur tabellen.
+    CHECK(projectdb::setSpanHeight(q, spanKey(6, 7), Part::Top, "").ok());
+    CHECK(hasSpan(storedOf(q), 6, 7, "21.2", "21.2", ""));
+    CHECK(projectdb::setSpanHeight(q, spanKey(6, 7), Part::Outer, "").ok());
+    CHECK(projectdb::setSpanHeight(q, spanKey(6, 7), Part::Middle, "").ok());
+    CHECK(storedOf(q).spans.count(spanKey(6, 7)) == 0);
+    CHECK(countIn(q, "SELECT count(*) FROM line_height_span WHERE row_a = 6 AND row_b = 7") == 0);
+    CHECK(projectdb::setTopAv(q, 7, "").ok());
+    CHECK(storedOf(q).topAv.count(7) == 0);
+    CHECK(countIn(q, "SELECT count(*) FROM line_height_pole") == 1);
+
+    // Invalid och NotFound ändrar ingenting och räknar inte upp revisionen.
+    const lineheight::StoredHeights fixed = storedOf(q);
+    const auto revision = q.revision();
+    const auto invalid = [&](const core::Result<void>& r) { CHECK(!r.ok() && r.error().code == ErrorCode::Invalid); };
+    const auto missing = [&](const core::Result<void>& r) { CHECK(!r.ok() && r.error().code == ErrorCode::NotFound); };
+    invalid(projectdb::setSpanHeight(q, lineheight::SpanKey{0, 1}, Part::Outer, "1"));
+    invalid(projectdb::setSpanHeight(q, lineheight::SpanKey{3, 3}, Part::Outer, "1"));
+    invalid(projectdb::setSpanHeight(q, lineheight::SpanKey{7, 6}, Part::Outer, "1"));
+    invalid(projectdb::setSpanHeight(q, spanKey(5, 6), Part::Outer, "12,3"));
+    invalid(projectdb::setSpanHeight(q, spanKey(5, 6), Part::Outer, "-1"));
+    invalid(projectdb::setSpanHeight(q, spanKey(5, 6), Part::Outer, "abc"));
+    invalid(projectdb::setTopAv(q, 0, "1"));
+    invalid(projectdb::setTopAv(q, -4, "1"));
+    invalid(projectdb::setTopAv(q, 6, "1,5"));
+    missing(projectdb::setSpanHeight(q, spanKey(5, 7), Part::Outer, "1"));
+    missing(projectdb::setSpanHeight(q, spanKey(2, 3), Part::Outer, "1"));
+    missing(projectdb::setSpanHeight(q, spanKey(3, 4), Part::Outer, "1"));
+    missing(projectdb::setSpanHeight(q, spanKey(11, 13), Part::Outer, "1"));
+    missing(projectdb::setTopAv(q, 99, "1"));
+    missing(projectdb::setTopAv(q, 3, "1"));
+    CHECK(storedOf(q) == fixed);
+    CHECK(q.revision() == revision);
+}
+
+// Linhöjderna följer raderna i Stolptabell efter (planen 7.6 och 7.7): nytt Stolpnr, dubbletter och
+// tomma Stolpnr ändrar inget, en infogad rad med data, en raderad rad och en tömd rad tar bort det som
+// hängde på dem, och före, importen och sträckorna rör inget. Kopieringen från före tar bort allt.
+void testLineHeightsFollowAfter()
+{
+    std::optional<projectdb::ProjectDb> opened;
+    if (!openTestProject("Linhöjder följer efter", opened))
+        return;
+    projectdb::ProjectDb& p = *opened;
+    using lineheight::Part;
+    using lineheight::spanKey;
+
+    CHECK(projectdb::setPoles(p, Stage::After, twelveRows()).ok());
+    std::vector<poletable::PoleRow> rows = afterRows(p);
+    CHECK(rows.size() == 12 && rows[5].id == 6);
+    CHECK(projectdb::setSpanHeight(p, spanKey(5, 6), Part::Outer, "12.33").ok());
+    CHECK(projectdb::setSpanHeight(p, spanKey(6, 7), Part::Outer, "21.2").ok());
+    CHECK(projectdb::setTopAv(p, 6, "265.9332").ok());
+    const lineheight::StoredHeights base = storedOf(p);
+    CHECK(base.spans.size() == 2 && base.topAv.size() == 1);
+
+    // 1. Nytt Stolpnr: allt står kvar.
+    rows[5].pole = "ST0379A";
+    CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+    CHECK(storedOf(p) == base);
+
+    // 2. En dubblett och en rad utan Stolpnr: allt står kvar, och spannen går att skriva i.
+    rows[6].pole = "ST0379";
+    rows[7].pole = "";
+    CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+    CHECK(storedOf(p) == base);
+    CHECK(projectdb::setSpanHeight(p, spanKey(6, 7), Part::Middle, "5").ok());
+    CHECK(projectdb::setSpanHeight(p, spanKey(7, 8), Part::Middle, "6").ok());
+    CHECK(projectdb::setSpanHeight(p, spanKey(6, 7), Part::Middle, "").ok());
+    CHECK(projectdb::setSpanHeight(p, spanKey(7, 8), Part::Middle, "").ok());
+    CHECK(storedOf(p) == base);
+    rows[6].pole = "ST0380";
+    rows[7].pole = "ST0381";
+    CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+    CHECK(storedOf(p) == base);
+
+    // 3. En tom rad mellan id 5 och 6 får id 13 och rör inget. Får raden data tas {5, 6} bort.
+    rows.insert(rows.begin() + 5, poletable::PoleRow{});
+    CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+    rows = afterRows(p);
+    CHECK(rows.size() == 13 && rows[5].id == 13 && rows[4].id == 5 && rows[6].id == 6);
+    CHECK(storedOf(p) == base);
+    rows[5].pole = "ST0378A";
+    rows[5].av = "300";
+    CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+    {
+        const lineheight::StoredHeights s = storedOf(p);
+        CHECK(s.spans.count(spanKey(5, 6)) == 0);
+        CHECK(hasSpan(s, 6, 7, "21.2", "", "") && s.topAv.count(6) == 1);
+    }
+    CHECK(projectdb::setSpanHeight(p, spanKey(5, 13), Part::Outer, "1").ok());
+    CHECK(projectdb::setSpanHeight(p, spanKey(6, 13), Part::Outer, "2").ok());
+
+    // 4. Raden med id 6 tas bort: dess spann och topplinans Av försvinner, och {7, 13} är nytt och tomt.
+    rows = afterRows(p);
+    rows.erase(rows.begin() + 6);
+    CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+    {
+        const lineheight::StoredHeights s = storedOf(p);
+        CHECK(s.spans.count(spanKey(6, 7)) == 0 && s.spans.count(spanKey(6, 13)) == 0);
+        CHECK(s.topAv.count(6) == 0);
+        CHECK(hasSpan(s, 5, 13, "1", "", ""));
+        CHECK(s.spans.count(spanKey(7, 13)) == 0);
+    }
+    CHECK(projectdb::setSpanHeight(p, spanKey(7, 13), Part::Outer, "3").ok());
+    CHECK(projectdb::setTopAv(p, 7, "1").ok());
+
+    // 5. Alla fält i raden med id 7 töms (id kvar): dess spann och topplinans Av tas bort.
+    rows = afterRows(p);
+    CHECK(rows[6].id == 7);
+    rows[6] = poletable::PoleRow{};
+    rows[6].id = 7;
+    CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+    const lineheight::StoredHeights remaining = storedOf(p);
+    CHECK(remaining.spans.size() == 1 && hasSpan(remaining, 5, 13, "1", "", ""));
+    CHECK(remaining.topAv.empty());
+
+    // 6. Före, importen och sträckorna lämnar linhöjderna orörda.
+    CHECK(projectdb::setPolesBefore(p, tenDecimalRows()).ok());
+    CHECK(storedOf(p) == remaining);
+    CHECK(projectdb::importPolesBefore(p, tenDecimalRows(), sampleRecord(tenDecimalRows())).ok());
+    CHECK(storedOf(p) == remaining);
+    CHECK(projectdb::setAutoSettings(p, Stage::After, standardSettings()).ok());
+    CHECK(storedOf(p) == remaining);
+
+    // 7. Kopieringen från före tar bort allt.
+    CHECK(projectdb::copyBeforeToAfter(p).ok());
+    CHECK(storedOf(p) == lineheight::StoredHeights{});
+}
+
+// Ett projekt från v0.6.0 (steg 1–7, user_version 7) migreras till steg 8: raderna i efter får
+// row_id = position + 1 (också den tomma), indexet och de två tomma tabellerna finns, allt annat är
+// orört, ett spann förbi den tomma raden går att spara och en ny rad sist får id 4.
+void testMigrateFromStep7()
+{
+    const std::string path = join(g_share, "Från steg 7.kalkyl");
+    if (!writeV040Project(path))
+        return;
+    {
+        auto d = db::Database::open(path, db::OpenOptions{});
+        CHECK(d.ok());
+        if (!d.ok())
+            return;
+        bool ok = d.value().exec(std::string(projectdb::dev::kStep5)).ok();
+        ok = ok && d.value().exec(std::string(projectdb::dev::kStep6)).ok();
+        ok = ok && d.value().exec(std::string(projectdb::dev::kStep7)).ok();
+        ok = ok && d.value().exec(R"sql(
+PRAGMA user_version = 7;
+INSERT INTO pole_after(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl, av2, av3)
+VALUES (0, 'ST0378', '363', NULL, '348', NULL, NULL, '44.19', '255/262', '362', '360'),
+       (1, '', NULL, NULL, NULL, NULL, NULL, NULL, '', NULL, NULL),
+       (2, 'ST0379', NULL, '12', '320', NULL, NULL, '41.5', '', NULL, '5');
+)sql").ok();
+        CHECK(ok);
+        if (!ok)
+            return;
+    }
+    CHECK(scalar(path, "PRAGMA user_version") == 7);
+
+    auto opened = projectdb::ProjectDb::open(path, options());
+    CHECK(opened.ok());
+    if (!opened.ok()) {
+        std::cerr << opened.error().message << " / " << opened.error().detail << std::endl;
+        return;
+    }
+    projectdb::ProjectDb& p = opened.value();
+    CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
+    CHECK(projectdb::kSchemaVersion == 8);
+    CHECK(countIn(p, kNineteenTablesSql) == 19);
+    CHECK(countIn(p, "SELECT count(*) FROM pole_after WHERE row_id = position + 1") == 3);
+    CHECK(countIn(p, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'pole_after_row_id'") == 1);
+    CHECK(countIn(p, "SELECT count(*) FROM line_height_span") == 0);
+    CHECK(countIn(p, "SELECT count(*) FROM line_height_pole") == 0);
+    CHECK(storedOf(p) == lineheight::StoredHeights{});
+    checkV040Data(p, false);
+    std::vector<poletable::PoleRow> after = afterRows(p);
+    CHECK(after.size() == 3);
+    if (after.size() == 3) {
+        CHECK(after[0].id == 1 && after[1].id == 2 && after[2].id == 3);
+        CHECK(after[0].pole == "ST0378" && after[0].av == "363" && after[0].av2 == "362" && after[0].av3 == "360");
+        CHECK(poletable::isEmptyRow(after[1]));
+        CHECK(after[2].pole == "ST0379" && after[2].ah == "12" && after[2].av3 == "5");
+    }
+
+    // Ett spann förbi den tomma raden, och en ny rad sist får id 4.
+    CHECK(projectdb::setSpanHeight(p, lineheight::spanKey(1, 3), lineheight::Part::Outer, "12.5").ok());
+    CHECK(publishNow(p));
+    const std::string reopenPath = p.path();
+    p.close();
+    auto reopened = projectdb::ProjectDb::open(reopenPath, options());
+    CHECK(reopened.ok());
+    if (!reopened.ok())
+        return;
+    CHECK(hasSpan(storedOf(reopened.value()), 1, 3, "12.5", "", ""));
+    after = afterRows(reopened.value());
+    after.push_back(poleRow("ST0380", "300", "", "", "", "", "", ""));
+    CHECK(projectdb::setPoles(reopened.value(), Stage::After, after).ok());
+    const std::vector<poletable::PoleRow> grown = afterRows(reopened.value());
+    CHECK(grown.size() == 4 && grown[3].id == 4 && grown[3].pole == "ST0380");
+    CHECK(hasSpan(storedOf(reopened.value()), 1, 3, "12.5", "", ""));
 }
 
 // Provprojektet för röktestet: ligger kvar i KALKYL_PROV_DIR och är stängt och olåst. Det har
@@ -3672,6 +4060,14 @@ void testProvProject()
         after.push_back(poleRow("ST0110", "270", "270", "260", "6508990.00", "411570.00", "39.0", ""));
         CHECK(projectdb::setPoles(p, Stage::After, after).ok());
         checkAutoMatches(p);
+        // Linhöjder för spannen runt ST0104 och ST0105 (radernas id 5 och 6) och topplinans Av för ST0104.
+        CHECK(projectdb::setSpanHeight(p, lineheight::spanKey(4, 5), lineheight::Part::Outer, "12.33").ok());
+        CHECK(projectdb::setSpanHeight(p, lineheight::spanKey(5, 6), lineheight::Part::Outer, "21.2").ok());
+        CHECK(projectdb::setSpanHeight(p, lineheight::spanKey(4, 5), lineheight::Part::Middle, "12.33").ok());
+        CHECK(projectdb::setSpanHeight(p, lineheight::spanKey(5, 6), lineheight::Part::Middle, "21.2").ok());
+        CHECK(projectdb::setSpanHeight(p, lineheight::spanKey(4, 5), lineheight::Part::Top, "22.63").ok());
+        CHECK(projectdb::setSpanHeight(p, lineheight::spanKey(5, 6), lineheight::Part::Top, "31.17").ok());
+        CHECK(projectdb::setTopAv(p, 5, "265.9332").ok());
         CHECK(publishNow(p));
         p.close();
     }
@@ -3733,6 +4129,10 @@ int main()
     testPoleImportReplaced();
     testPoleImportUntouched();
     testPoleImportInvalid();
+    testMigrateFromStep7();
+    testRowIds();
+    testLineHeights();
+    testLineHeightsFollowAfter();
     testReadOnlyWrites();
     testReadOnlyAutoCalcs();
     testInvalid();

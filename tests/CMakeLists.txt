@@ -16,6 +16,7 @@ kalkyl_add_test(poletable poletable_test.cpp kalkyl_poletable kalkyl_tabletext)
 kalkyl_add_test(ancalc ancalc_test.cpp kalkyl_ancalc)
 kalkyl_add_test(automode automode_test.cpp kalkyl_automode kalkyl_poletable kalkyl_ancalc)
 kalkyl_add_test(poleview poleview_test.cpp kalkyl_poleview kalkyl_automode kalkyl_poletable)
+kalkyl_add_test(lineheight lineheight_test.cpp kalkyl_lineheight kalkyl_poleview kalkyl_automode kalkyl_poletable kalkyl_tabletext)
 kalkyl_add_test(linecalc linecalc_test.cpp kalkyl_linecalc)
 kalkyl_add_test(load_cases load_cases_test.cpp kalkyl_linecalc)
 kalkyl_add_test(linecalc_facit linecalc_facit_test.cpp kalkyl_linecalc)
@@ -42,3 +43,8 @@ kalkyl_add_test(sheetgrid sheetgrid_test.cpp kalkyl_sheetgrid kalkyl_tabletext)
 
 # Stolptabellen i en DataGrid (cellLook, inget fönster).
 kalkyl_add_test(polegrid polegrid_test.cpp kalkyl_polegrid kalkyl_automode kalkyl_poletable)
+
+# Linhöjdsbladet i ett dolt fönster (svarar 77 utan skärm).
+kalkyl_add_test(lineheightsheet lineheightsheet_test.cpp kalkyl_lineheightsheet kalkyl_lineheight)
+target_compile_definitions(kalkyl_lineheightsheet_test PRIVATE KALKYL_PROV_DIR="${CMAKE_BINARY_DIR}/prov")
+set_tests_properties(lineheightsheet PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)

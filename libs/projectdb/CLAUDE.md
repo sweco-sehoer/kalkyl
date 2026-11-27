@@ -11,12 +11,12 @@ Importens rådata (`pole_import*`, `importPolesBefore` och `lastPoleImport`) st�
 
 | Fil | Innehåll |
 |---|---|
-| `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform`, `kalkyl_ancalc`, `kalkyl_conductor`, `kalkyl_linecalc`, `kalkyl_poletable` och `kalkyl_automode` (PUBLIC, eftersom `project_data.h` inkluderar dem), `kalkyl_tabletext` och `kalkyl_version`). Testet `projectdb` ligger i `tests/` |
+| `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform`, `kalkyl_ancalc`, `kalkyl_conductor`, `kalkyl_linecalc`, `kalkyl_poletable`, `kalkyl_automode` och `kalkyl_lineheight` (PUBLIC, eftersom `project_data.h` inkluderar dem), `kalkyl_tabletext` och `kalkyl_version`). Testet `projectdb` ligger i `tests/` |
 | `project_db.h` | `ProjectDb`, `OpenOptions`, `Snapshot`, `Access`, `defaultWorkDir`, `withExtension` och `cleanWorkDir` |
-| `dev_migration.h` | Utvecklingsmigreringen: stegen efter v0.1.0 (`dev::kStep2` med linkopiorna, Dokumentation och normalspannet, `dev::kStep3` med linberäkningarna, `dev::kStep4` med Stolptabell före, `dev::kStep5` med Stolptabell efter, automatiskt läge och märkningen av de automatiska beräkningarna, `dev::kStep6` med importens rådata `pole_import*`, `dev::kStep7` med Av per fas i `pole_after`). Töms vid 1.0.0 |
+| `dev_migration.h` | Utvecklingsmigreringen: stegen efter v0.1.0 (`dev::kStep2` med linkopiorna, Dokumentation och normalspannet, `dev::kStep3` med linberäkningarna, `dev::kStep4` med Stolptabell före, `dev::kStep5` med Stolptabell efter, automatiskt läge och märkningen av de automatiska beräkningarna, `dev::kStep6` med importens rådata `pole_import*`, `dev::kStep7` med Av per fas i `pole_after`, `dev::kStep8` med radernas id `row_id` och linhöjderna). Töms vid 1.0.0 |
 | `project_db.cpp` | Schemat (steg 1, v0.1.0, och stegen ur `dev_migration.h`), `create`, `open` med schemakontroll, lås, städning vid fel, `snapshot`/`publish`/`published`, revisionen och `close` |
-| `project_data.h` | Dataskrivningarna och läsningarna: `DocValue`, `AutoOrigin`, `NormalSpan`, `LineCalc`, `Wire`, `Stage`, `docValues`, `setDocValue`, linkopiorna, beräkningarna, kopplingarna, upplösningen av linberäkningarna, `calculateSpan`, texterna (`poleTableName`, `autoLineWord`, `autoLineLabel`), stolptabellerna (`poles`, `setPoles`, `polesBefore`, `setPolesBefore`), automatiskt läge (`AutoSettings`, `autoSettings`, `setAutoSettings`, `copyBeforeToAfter`) och importen av en stolptabell (`importPolesBefore`, `lastPoleImport`) |
-| `project_data.cpp` | Implementationen av `project_data.h`: SQL i råa strängliteraler, en transaktion per skrivning, synkningen `syncAutoCalcs`, `writePoleRows` (delas av `setPoles` och `importPolesBefore`) och rådataposten |
+| `project_data.h` | Dataskrivningarna och läsningarna: `DocValue`, `AutoOrigin`, `NormalSpan`, `LineCalc`, `Wire`, `Stage`, `docValues`, `setDocValue`, linkopiorna, beräkningarna, kopplingarna, upplösningen av linberäkningarna, `calculateSpan`, texterna (`poleTableName`, `autoLineWord`, `autoLineLabel`), stolptabellerna (`poles`, `setPoles`, `polesBefore`, `setPolesBefore`), automatiskt läge (`AutoSettings`, `autoSettings`, `setAutoSettings`, `copyBeforeToAfter`), importen av en stolptabell (`importPolesBefore`, `lastPoleImport`) och linhöjderna (`lineHeights`, `setSpanHeight`, `setTopAv`) |
+| `project_data.cpp` | Implementationen av `project_data.h`: SQL i råa strängliteraler, en transaktion per skrivning, synkningen `syncAutoCalcs`, `writePoleRows` (delas av `setPoles` och `importPolesBefore`), `readLineHeights` och `pruneLineHeights` och rådataposten |
 ## Regler
 
 - **SQLite öppnar aldrig originalet.** `open` kopierar filen med `CopyFileExW` till `workDir`, och allt arbete går mot arbetskopian (`local()`).
@@ -43,14 +43,18 @@ Importens rådata (`pole_import*`, `importPolesBefore` och `lastPoleImport`) st�
 - **Steg 5** (`dev::kStep5`) lägger till `pole_after` (Stolptabell efter), `auto_mode` och `auto_calc`.
 - **Steg 6** (`dev::kStep6`) lägger till de fyra tabellerna för importens rådata (`pole_import`, `pole_import_column`, `pole_import_row` och `pole_import_cell`).
   Steg 5 och 6 är committade i v0.5.0 och ändras aldrig.
-- **Steg 7** (`dev::kStep7`) ger `pole_after` kolumnerna `av2` och `av3` (Av Fas2 och Fas3; `av` är Fas1), och de befintliga raderna får Av i alla tre faserna. `kSchemaVersion` = 7.
-  Steg 7 är inte committat och kan ändras tills det committas, utom när användaren redan har projekt med user_version 7; då blir nya ändringar ett nytt steg sist.
-  Schemat har 17 tabeller, och `kExpectedTablesSql` och `kExpectedTableCount` (17) i `project_db.cpp` räknar alla.
+- **Steg 7** (`dev::kStep7`) ger `pole_after` kolumnerna `av2` och `av3` (Av Fas2 och Fas3; `av` är Fas1), och de befintliga raderna får Av i alla tre faserna.
+  Steg 7 är committat i v0.6.0 och ändras aldrig.
+- **Steg 8** (`dev::kStep8`) ger `pole_after` kolumnen `row_id` (radens id, `PoleRow::id`; de befintliga raderna får `position + 1`), det unika indexet `pole_after_row_id` och de två tabellerna
+  `line_height_span` (`row_a`, `row_b` med `row_a < row_b`, `outer_m`, `middle_m`, `top_m` som kanonisk decimaltext eller NULL, `WITHOUT ROWID`) och `line_height_pole` (`row_id`, `top_av`). `kSchemaVersion` = 8.
+  `ADD COLUMN` har ingen CHECK, eftersom SQLite prövar den mot de befintliga raderna före `UPDATE`. Steg 8 är inte committat och kan ändras tills det committas.
+  Schemat har 19 tabeller, och `kExpectedTablesSql` och `kExpectedTableCount` (19) i `project_db.cpp` räknar alla.
   Ett projekt från en äldre version migreras när det öppnas och sparas med det nya schemat vid nästa publicering. Migreringen kör ingen synkning: läget är av och det finns inga automatiska beräkningar.
   Migreringstesten är `testMigrateFromV010`, `testMigrateFromV020`, `testMigrateFromV030` (filen byggd som i v0.3.2, user_version 3) och `testMigrateFromV040` (filen byggd som i v0.4.0, user_version 4, med läget på i efter efter öppningen).
-  Alla räknar 17 tabeller (`kSeventeenTablesSql`), och `testMigrateFromV040` kontrollerar också att `pole_import` är tom och att `lastPoleImport` ger tomt svar.
+  Alla räknar 19 tabeller (`kNineteenTablesSql`), och `testMigrateFromV040` kontrollerar också att `pole_import` är tom och att `lastPoleImport` ger tomt svar.
   `testMigrateFromStep5` bygger en fil med steg 1–5 och user_version 5 (13 tabeller, med Stolptabell efter och inställningen för automatiskt läge) och kontrollerar att steg 6 läggs till och att allt finns kvar.
   `testMigrateFromStep6` bygger en fil med steg 1–6 och user_version 6 och kontrollerar att Av Fas2 och Fas3 får Av (NULL förblir tomt), att faserna sparas och läses tillbaka och att `copyBeforeToAfter` ger Av i alla tre.
+  `testMigrateFromStep7` bygger en fil med steg 1–7 och user_version 7 (tre rader i `pole_after`, den mittersta helt tom) och kontrollerar `row_id` 1, 2 och 3, indexet, de tomma linhöjdstabellerna, oförändrade data, ett spann förbi den tomma raden och id 4 på en ny rad sist.
 - **Schemakontroll:** `open` räknar tabellerna i `kExpectedTablesSql` efter `migrate` och före `quickCheck`. Saknas någon (skadad fil) blir felet `NotADatabase`
   med texten "Projektfilen saknar delar som den här versionen av Kalkyl behöver. Filen är skadad:" följd av en radbrytning och sökvägen.
   Låset och arbetskopian städas som vid andra fel, och texten går inte genom `relabel`. Listan hålls lika med schemat.
@@ -103,6 +107,20 @@ Importens rådata (`pole_import*`, `importPolesBefore` och `lastPoleImport`) st�
 - **`docLineSources`:** en tagen rad får den automatiska beräkningens aₙ (tomt vid fel), och nyckeln läggs i `autoSpanKeys`. `resolveLineInput` ger då texten "… har fel och ger inget aₙ. Rätta sträckan eller stolparna i <tabell>."
 - **Spärrarna** ger `Invalid` och ändrar inget: T1 (ändra, koppla om eller göra manuell en automatisk beräkning), T2 (ta bort den) och T3 (koppla om en tagen rad: `saveNormalSpan`/`saveLineCalc` med en tagen `linkDocKey` eller `docSource`, `linkNormalSpan`, `linkLineCalc`, `unlinkDocRow`).
   Spärrarna gäller de reserverade id:na också när läget är av. Att spara en lagrad kopplad beräkning på en tagen rad och `setDocValue` på en tagen rad är tillåtet.
+
+## Radernas id och linhöjderna
+
+- **Radens id** är `pole_after.row_id` (`PoleRow::id`): ett tal > 0, unikt i tabellen (`pole_after_row_id`), som följer raden när rader infogas, raderas och ändras. Stolpnr är inget id.
+  `poles(p, After)` läser det, och före ger alltid 0 (`pole_before` har ingen kolumn). `setPoles(p, After, rows)` sparar `rowsToSave(rows)` och ger först rader utan id, och senare dubbletter, nästa lediga id (`poletable::assignRowIds`).
+  `copyBeforeToAfter` ger raderna `row_id = position + 1`.
+- **Linhöjderna** (`lineHeights`, `setSpanHeight`, `setTopAv`; typerna ur `libs/lineHeight`): `line_height_span` har en rad per spann mellan två grannrader (de två radernas `row_id`, `row_a < row_b`) med tre delar (ytterfaser, mittfas, topplina), och `line_height_pole` har topplinans Av per rad.
+  Värdena är kanonisk decimaltext, en tom del är NULL och en rad utan värden tas bort.
+  `setSpanHeight` kontrollerar i ordning nyckeln (Invalid "Spannet för linhöjden är ogiltigt."), talet (`acceptHeight`, Invalid "Linhöjden är inget giltigt tal.") och att spannet finns i `afterSpans` (NotFound "Spannet finns inte längre i Stolptabell efter.").
+  `setTopAv` kontrollerar `row > 0` (Invalid "Raden för topplinans Av är ogiltig."), talet (`acceptAv`, Invalid "Topplinans Av är inget giltigt tal.") och att raden finns i efter och inte är helt tom (NotFound "Raden finns inte längre i Stolptabell efter."). En tom text tar bort värdet.
+- **Städningen `pruneLineHeights`** körs i samma transaktion sist i varje `setPoles(After)` (efter `writePoleRows`): `lineheight::keptHeights(stored, rowsEfter)` ger det som får stå kvar, och spann som inte längre är grannar
+  samt topplinans Av för borttagna eller helt tomma rader tas bort. Kvarvarande värden skrivs aldrig om. `copyBeforeToAfter` tömmer båda tabellerna. `setPolesBefore`, `importPolesBefore` och `setAutoSettings` rör dem aldrig.
+- **Regel:** en ny skrivning av `pole_after` ska också köra `pruneLineHeights`, och en skrivning som byter ut alla rader ska tömma linhöjderna.
+- **Testerna** i `projectdb_test.cpp`: `testRowIds`, `testLineHeights`, `testLineHeightsFollowAfter` (nytt Stolpnr, dubbletter, tomma Stolpnr, infogad tom rad och rad med data, raderad rad, tömd rad, före/import/sträckor orörda, kopieringen), `testMigrateFromStep7`, och linhöjderna i `testReadOnlyWrites`, `testRevision` och provprojektet.
 
 ## Importens rådata
 

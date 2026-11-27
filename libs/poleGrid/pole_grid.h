@@ -92,6 +92,9 @@ public:
     // Tabellen jämförs med Stolptabell före (Stolptabell efter): filtret Changed går att använda och
     // snabbmenyn får Kopiera från Stolptabell före. Förval av, och då är filtret alltid All.
     void setComparesWithBefore(bool on);
+    // Raderna har id (Stolptabell efter): före varje sparning får nya rader ett id med
+    // poletable::assignRowIds, så att raderna i tabellen och i projektet har samma id. Förval av.
+    void setRowIds(bool on);
     // Filtret. Sparar en öppen cell, bygger om vyn och behåller den aktuella raden på samma höjd (5.5).
     void setFilter(poleview::Filter filter);
     poleview::Filter filter() const;
@@ -181,6 +184,7 @@ private:
     std::unique_ptr<sheetgrid::SheetGrid> sheet_;      // Excel-markeringen i grid_
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);   // spärr för postade anrop
     bool compares_ = false;                            // jämförs med Stolptabell före
+    bool rowIds_ = false;                              // nya rader får id före sparningen
     poleview::Filter filter_ = poleview::Filter::All;  // filtret
     poleview::PoleView view_ = poleview::identityView(0);   // tabellens rader: stolpar, grå rader, tom rad
     bool viewPending_ = false;                         // vyn ska byggas om när det går

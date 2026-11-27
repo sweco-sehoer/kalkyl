@@ -1042,12 +1042,12 @@ std::string_view poleTableSql(Stage stage)
 }
 
 // Läser stolptabellen för skedet i tabellens ordning. NULL i en talkolumn blir tom text. Efter har
-// dessutom Av Fas2 och Fas3 (av2, av3); i före blir de tomma.
+// dessutom Av Fas2 och Fas3 (av2, av3) och radens id (row_id); i före blir de tomma respektive 0.
 Result<std::vector<poletable::PoleRow>> readPoles(db::Database& d, Stage stage)
 {
     const bool phases = stage == Stage::After;
     const std::string sql = std::string("SELECT pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl") +
-                            (phases ? ", av2, av3" : "") + " FROM " + std::string(poleTableSql(stage)) +
+                            (phases ? ", av2, av3, row_id" : "") + " FROM " + std::string(poleTableSql(stage)) +
                             " ORDER BY position";
     auto stmt = prepared(d, sql, {});
     if (!stmt)
@@ -1073,6 +1073,7 @@ Result<std::vector<poletable::PoleRow>> readPoles(db::Database& d, Stage stage)
         if (phases) {
             row.av2 = s.text(8);
             row.av3 = s.text(9);
+            row.id = s.integer(10);
         }
         rows.push_back(std::move(row));
     }
@@ -2232,7 +2233,8 @@ Result<void> validatePoleRows(Stage stage, const std::vector<poletable::PoleRow>
 
 // Ersätter raderna i stolptabellen för skedet: tömmer tabellen och skriver poletable::rowsToSave(rows)
 // med positionerna 0, 1, 2 ... Tomma tal binds som NULL. Efter får också Av Fas2 och Fas3 (av2,
-// av3); före har inga sådana kolumner. Ingen validering och ingen synkning här.
+// av3) och radens id (row_id, som rows ska ha gett via assignRowIds); före har inga sådana
+// kolumner. Ingen validering och ingen synkning här.
 Result<void> writePoleRows(db::Database& d, Stage stage, const std::vector<poletable::PoleRow>& rows)
 {
     const std::string table(poleTableSql(stage));
@@ -2241,7 +2243,7 @@ Result<void> writePoleRows(db::Database& d, Stage stage, const std::vector<polet
         return r;
     const std::string insert =
         "INSERT INTO " + table + "(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl" +
-        (phases ? std::string(", av2, av3) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)")
+        (phases ? std::string(", av2, av3, row_id) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)")
                 : std::string(") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"));
     const std::vector<poletable::PoleRow> toSave = poletable::rowsToSave(rows);
     std::int64_t position = 0;
@@ -2256,7 +2258,7 @@ Result<void> writePoleRows(db::Database& d, Stage stage, const std::vector<polet
                                number(poletable::kAh), number(poletable::kSpan),
                                number(poletable::kNorth), number(poletable::kEast),
                                number(poletable::kHeight), std::string_view(row.lkl),
-                               number(poletable::kAv2), number(poletable::kAv3)})
+                               number(poletable::kAv2), number(poletable::kAv3), row.id})
                         : run(d, insert,
                               {position, std::string_view(row.pole), number(poletable::kAv),
                                number(poletable::kAh), number(poletable::kSpan),
@@ -2269,17 +2271,90 @@ Result<void> writePoleRows(db::Database& d, Stage stage, const std::vector<polet
     return {};
 }
 
+// Läser linhöjderna: spannen (en rad per spann, NULL blir tom text) och topplinans Av per rad.
+Result<lineheight::StoredHeights> readLineHeights(db::Database& d)
+{
+    lineheight::StoredHeights stored;
+    {
+        auto stmt = prepared(d, "SELECT row_a, row_b, outer_m, middle_m, top_m FROM line_height_span", {});
+        if (!stmt)
+            return stmt.error();
+        while (true) {
+            auto step = stmt.value().step();
+            if (!step)
+                return step.error();
+            if (!step.value())
+                break;
+            const db::Statement& s = stmt.value();
+            lineheight::SpanHeights heights;
+            heights.outer = s.text(2);
+            heights.middle = s.text(3);
+            heights.top = s.text(4);
+            stored.spans[lineheight::SpanKey{s.integer(0), s.integer(1)}] = std::move(heights);
+        }
+    }
+    auto stmt = prepared(d, "SELECT row_id, top_av FROM line_height_pole", {});
+    if (!stmt)
+        return stmt.error();
+    while (true) {
+        auto step = stmt.value().step();
+        if (!step)
+            return step.error();
+        if (!step.value())
+            break;
+        stored.topAv[stmt.value().integer(0)] = stmt.value().text(1);
+    }
+    return stored;
+}
+
+// Håller linhöjderna lika med raderna i Stolptabell efter: det som lineheight::keptHeights inte
+// behåller (spann som inte längre är grannar, topplinans Av för borttagna eller tomma rader) tas
+// bort. Kvarvarande värden skrivs aldrig om.
+Result<void> pruneLineHeights(db::Database& d)
+{
+    auto rows = readPoles(d, Stage::After);
+    if (!rows)
+        return rows.error();
+    auto stored = readLineHeights(d);
+    if (!stored)
+        return stored.error();
+    const lineheight::StoredHeights kept = lineheight::keptHeights(stored.value(), rows.value());
+    for (const auto& entry : stored.value().spans) {
+        if (kept.spans.count(entry.first) != 0)
+            continue;
+        if (auto r = run(d, "DELETE FROM line_height_span WHERE row_a = ?1 AND row_b = ?2",
+                         {entry.first.a, entry.first.b});
+            !r)
+            return r;
+    }
+    for (const auto& entry : stored.value().topAv) {
+        if (kept.topAv.count(entry.first) != 0)
+            continue;
+        if (auto r = run(d, "DELETE FROM line_height_pole WHERE row_id = ?1", {entry.first}); !r)
+            return r;
+    }
+    return {};
+}
+
 } // namespace
 
 // Ersätter hela stolptabellen för skedet i en transaktion. Talen valideras först, och en tom rad
-// sist sparas inte. Tomma tal binds som NULL. De automatiska beräkningarna följer med.
+// sist sparas inte. Tomma tal binds som NULL. I efter får rader utan id ett (assignRowIds) och
+// linhöjderna som inte längre hör till raderna tas bort. De automatiska beräkningarna följer med.
 Result<void> setPoles(ProjectDb& p, Stage stage, const std::vector<poletable::PoleRow>& rows)
 {
     return write(p, [&](db::Database& d) -> Result<void> {
         if (auto v = validatePoleRows(stage, rows); !v)
             return v;
-        if (auto w = writePoleRows(d, stage, rows); !w)
+        std::vector<poletable::PoleRow> toWrite = poletable::rowsToSave(rows);
+        if (stage == Stage::After)
+            poletable::assignRowIds(toWrite);
+        if (auto w = writePoleRows(d, stage, toWrite); !w)
             return w;
+        if (stage == Stage::After) {
+            if (auto pruned = pruneLineHeights(d); !pruned)
+                return pruned;
+        }
         return syncAutoCalcs(d, platform::nowUtcIso());
     });
 }
@@ -2330,19 +2405,25 @@ ON CONFLICT(stage) DO UPDATE SET
     });
 }
 
-// Gör Stolptabell efter till en kopia av före: raderna (Av i alla tre faserna), sträckorna och
-// läget. Det som fanns i efter försvinner, och de automatiska beräkningarna synkas i samma transaktion.
+// Gör Stolptabell efter till en kopia av före: raderna (Av i alla tre faserna, id = position + 1),
+// sträckorna och läget. Det som fanns i efter försvinner, linhöjderna med, och de automatiska
+// beräkningarna synkas i samma transaktion.
 Result<void> copyBeforeToAfter(ProjectDb& p)
 {
     return write(p, [&](db::Database& d) -> Result<void> {
         if (auto r = run(d, "DELETE FROM pole_after", {}); !r)
             return r;
         if (auto r = run(d, R"sql(
-INSERT INTO pole_after(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl, av2, av3)
-SELECT position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl, av, av FROM pole_before
+INSERT INTO pole_after(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl, av2, av3, row_id)
+SELECT position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl, av, av, position + 1 FROM pole_before
 )sql",
                          {});
             !r)
+            return r;
+        // Raderna i efter är nya rader, så linhöjderna hör inte längre till något.
+        if (auto r = run(d, "DELETE FROM line_height_span", {}); !r)
+            return r;
+        if (auto r = run(d, "DELETE FROM line_height_pole", {}); !r)
             return r;
         if (auto r = run(d, "DELETE FROM auto_mode WHERE stage = 'after'", {}); !r)
             return r;
@@ -2632,6 +2713,71 @@ FROM pole_import WHERE id = 1
         }
     }
     return std::optional<poletable::ImportRecord>{std::move(record)};
+}
+
+// Läser linhöjderna: spannen och topplinans Av. Tomt svar när inget är sparat.
+Result<lineheight::StoredHeights> lineHeights(ProjectDb& p)
+{
+    return readLineHeights(p.local());
+}
+
+// Skriver en del av ett spann. Nyckeln, talet och spannet (två grannrader i Stolptabell efter)
+// kontrolleras först. Tom text blir NULL, och en rad där alla tre delar är NULL tas bort.
+Result<void> setSpanHeight(ProjectDb& p, const lineheight::SpanKey& span, lineheight::Part part,
+                           const std::string& value)
+{
+    return write(p, [&](db::Database& d) -> Result<void> {
+        if (!lineheight::isValidKey(span))
+            return makeError(ErrorCode::Invalid, "Spannet för linhöjden är ogiltigt.");
+        if (lineheight::acceptHeight(value) != std::optional<std::string>(value))
+            return makeError(ErrorCode::Invalid, "Linhöjden är inget giltigt tal.");
+        auto rows = readPoles(d, Stage::After);
+        if (!rows)
+            return rows.error();
+        const std::vector<lineheight::SpanKey> spans = lineheight::afterSpans(rows.value());
+        if (std::find(spans.begin(), spans.end(), span) == spans.end())
+            return makeError(ErrorCode::NotFound, "Spannet finns inte längre i Stolptabell efter.");
+        const std::string_view column = part == lineheight::Part::Outer    ? "outer_m"
+                                        : part == lineheight::Part::Middle ? "middle_m"
+                                                                           : "top_m";
+        const std::string upsert = "INSERT INTO line_height_span(row_a, row_b, " + std::string(column) +
+                                   ") VALUES(?1, ?2, ?3) ON CONFLICT(row_a, row_b) DO UPDATE SET " +
+                                   std::string(column) + " = excluded." + std::string(column);
+        const Arg bound = value.empty() ? Arg{nullptr} : Arg{std::string_view(value)};
+        if (auto r = run(d, upsert, {span.a, span.b, bound}); !r)
+            return r;
+        return run(d, R"sql(
+DELETE FROM line_height_span
+ WHERE row_a = ?1 AND row_b = ?2 AND outer_m IS NULL AND middle_m IS NULL AND top_m IS NULL
+)sql",
+                   {span.a, span.b});
+    });
+}
+
+// Skriver topplinans Av för en rad i Stolptabell efter. Raden måste finnas och inte vara helt tom.
+// Tom text tar bort värdet.
+Result<void> setTopAv(ProjectDb& p, std::int64_t row, const std::string& value)
+{
+    return write(p, [&](db::Database& d) -> Result<void> {
+        if (row <= 0)
+            return makeError(ErrorCode::Invalid, "Raden för topplinans Av är ogiltig.");
+        if (lineheight::acceptAv(value) != std::optional<std::string>(value))
+            return makeError(ErrorCode::Invalid, "Topplinans Av är inget giltigt tal.");
+        auto rows = readPoles(d, Stage::After);
+        if (!rows)
+            return rows.error();
+        const auto at = std::find_if(rows.value().begin(), rows.value().end(),
+                                     [&](const poletable::PoleRow& r) { return r.id == row; });
+        if (at == rows.value().end() || poletable::isEmptyRow(*at))
+            return makeError(ErrorCode::NotFound, "Raden finns inte längre i Stolptabell efter.");
+        if (value.empty())
+            return run(d, "DELETE FROM line_height_pole WHERE row_id = ?1", {row});
+        return run(d, R"sql(
+INSERT INTO line_height_pole(row_id, top_av) VALUES(?1, ?2)
+ON CONFLICT(row_id) DO UPDATE SET top_av = excluded.top_av
+)sql",
+                   {row, std::string_view(value)});
+    });
 }
 
 } // namespace kalkyl::projectdb

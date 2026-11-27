@@ -142,20 +142,25 @@ PoleView identityView(int count) {
     return view;
 }
 
-// Reglerna i planen 5.2: ett enda område syns, från första märkta raden minus kMargin till sista
-// plus kMargin, med allt emellan. Raderna före och efter blir var sin grå rad när de är minst två.
-PoleView buildView(int count, const std::vector<bool>& marks, Filter filter) {
+// Första märkta raden minus margin till sista plus margin, klampat till tabellen. Bara posterna
+// för tabellens rader räknas; poster bortom count ignoreras.
+MarkedRange changedArea(int count, const std::vector<bool>& marks, int margin) {
     count = std::max(count, 0);
-    // Bara posterna för tabellens rader räknas; poster bortom count ignoreras.
     const std::size_t usable = std::min(static_cast<std::size_t>(count), marks.size());
     const MarkedRange range =
         markedRange(std::vector<bool>(marks.begin(), marks.begin() + static_cast<std::ptrdiff_t>(usable)));
-    if (filter == Filter::All || range.first < 0)
-        return identityView(count);
+    if (range.first < 0)
+        return {-1, -1};
+    return {std::max(0, range.first - margin), std::min(count - 1, range.last + margin)};
+}
 
-    // Området: första märkta raden minus kMargin till sista plus kMargin, klampat till tabellen.
-    const int from = std::max(0, range.first - kMargin);
-    const int to = std::min(count - 1, range.last + kMargin);
+// Reglerna i planen 5.2: ett enda område syns (changedArea med kMargin), med allt emellan. Raderna
+// före och efter blir var sin grå rad när de är minst två, och en ensam rad visas som vanligt.
+PoleView buildView(int count, const std::vector<bool>& marks, Filter filter) {
+    count = std::max(count, 0);
+    const MarkedRange area = changedArea(count, marks, kMargin);
+    if (filter == Filter::All || area.first < 0)
+        return identityView(count);
 
     // Raderna före och efter området: en grå rad när de är minst två, annars en vanlig rad.
     PoleView view;
@@ -167,10 +172,10 @@ PoleView buildView(int count, const std::vector<bool>& marks, Filter filter) {
         for (int m = first; m <= last; ++m)
             view.rows.push_back({ViewKind::Pole, m, m});
     };
-    addOutside(0, from - 1);
-    for (int m = from; m <= to; ++m)
+    addOutside(0, area.first - 1);
+    for (int m = area.first; m <= area.last; ++m)
         view.rows.push_back({ViewKind::Pole, m, m});
-    addOutside(to + 1, count - 1);
+    addOutside(area.last + 1, count - 1);
     view.rows.push_back({ViewKind::Blank, count, count});
     return view;
 }

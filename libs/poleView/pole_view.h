@@ -10,7 +10,8 @@ namespace kalkyl::poleview {
 // runt dem syns, resten står ihop i grå rader. All visar alla rader.
 enum class Filter { Changed, All };
 
-// Antalet rader ovanför och nedanför en förändrad rad som också syns (±2).
+// Antalet rader ovanför och nedanför en förändrad rad som också syns (±2). Två rader, så att alla
+// stolpar som spannen i fliken Linhöjder når syns (blocken ±1 och deras spann ett steg till).
 inline constexpr int kMargin = 2;
 
 // Vad en rad i vyn står för: en rad i tabellen, en grå rad för dolda rader eller den tomma raden sist.
@@ -53,12 +54,16 @@ struct MarkedRange {
 };
 MarkedRange markedRange(const std::vector<bool>& marks);
 
+// Det ändrade området: från första sanna posten bland de count första i marks minus margin till
+// sista plus margin, räknat på radernas plats och klampat till 0..count-1. {-1, -1} utan sann
+// post. buildView använder kMargin och fliken Linhöjder lineheight::kBlockMargin.
+MarkedRange changedArea(int count, const std::vector<bool>& marks, int margin);
+
 // Vyn med en Pole per rad och Blank sist.
 PoleView identityView(int count);
 
-// Vyn för count rader (planen 5.2). Changed visar ett enda område, från första sanna posten i marks
-// minus kMargin till sista plus kMargin, och raderna före och efter blir var sin Hidden när de är
-// minst två. All, eller ingen sann post i marks, ger identityView. Poster bortom count ignoreras och
+// Vyn för count rader (planen 5.2). Changed visar ett enda område (changedArea med kMargin), och
+// raderna före och efter blir var sin Hidden när de är minst två. All, eller ingen sann post i marks, ger identityView. Poster bortom count ignoreras och
 // saknade poster är falska.
 PoleView buildView(int count, const std::vector<bool>& marks, Filter filter);
 

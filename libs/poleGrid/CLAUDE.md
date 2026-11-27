@@ -9,7 +9,7 @@ Det beror på `glaze`, `kalkyl_sheetgrid`, `kalkyl_poletable`, `kalkyl_automode`
 | Fil | Innehåll |
 |---|---|
 | `CMakeLists.txt` | Biblioteket `kalkyl_polegrid` (testet `polegrid` ligger i `tests/`) |
-| `pole_grid.h` | `PoleGridHost` (det fönstret svarar på, med `filterChanged`), `PoleLooks` och `CellLook`, de rena funktionerna `cellLook` och `computedSpanText` och klassen `PoleGrid` |
+| `pole_grid.h` | `PoleGridHost` (det fönstret svarar på, med `filterChanged`), `PoleLooks` och `CellLook`, de rena funktionerna `cellLook` och `computedSpanText` och klassen `PoleGrid` (med `setRowIds`) |
 | `pole_grid.cpp` | Implementationen: `cellLook`, adaptern till `SheetGrid`, vyn och ombyggnaden, tabellens händelser, sparning, Infoga rad, Radera rader, inklistringen mot modellen och `GridProbe` |
 
 ## Regler
@@ -34,6 +34,10 @@ Det beror på `glaze`, `kalkyl_sheetgrid`, `kalkyl_poletable`, `kalkyl_automode`
   Modellen har kvar den tomma texten: en inskriven spannlängd ersätter värdet, en tömd cell räknas igen, och ett uträknat värde som bekräftas oförändrat förblir uträknat.
 - **`setLooks`** målar om och sätter tooltips och flaggor, och bygger om vyn när den ändrade jämförelsen ger en annan. `setRows` och varje strukturell ändring (`fill`) sätter dem tillbaka,
   eftersom `DataGrid::setRows` nollar cellinställningarna.
+- **Radernas id** (`setRowIds(true)`, bara på Stolptabell efter): `save()` kör `poletable::assignRowIds(rows_)` först, så att nya rader får id före jämförelsen med det senast sparade och före `savePoles`,
+  och raderna i tabellen och i projektet har samma id. Id:t följer `PoleRow`-objektet genom alla vägar utan särskild kod: Infoga rad ovanför (`insert`), Radera rader… och papperskorgen (`erase`),
+  inklistring, Delete och Klipp ut (`applyEdits` skriver fälten och rör inte id:t; nya rader bortom slutet och den tomma raden sist får id 0 och sedan id vid sparningen), Kopiera från Stolptabell före per cell (`applyEdits`)
+  och `setRows` (id:na ur projektet). Ingen väg kopierar eller flyttar en `PoleRow` till en annan plats, och id:t är inget fält, så det syns aldrig i urklippet. En ny väg som skapar rader måste sluta i `save()`.
 - **Sparningen** sker direkt vid varje ändring och bara när `poletable::rowsToSave` skiljer sig från det senast sparade.
   Misslyckas den postas en omläsning med `reloadPoles` (bakom `alive_`, så att tabellen inte byggs om mitt i sin egen händelse).
 - **Skrivskyddat** (`setReadOnly`) låser cellerna, tar bort papperskorgarna och låter markeringen bara kopiera. Filtret och Visa alla rader fungerar ändå.
