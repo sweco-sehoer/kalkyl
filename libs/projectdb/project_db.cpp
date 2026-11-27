@@ -50,7 +50,7 @@ db::Schema schema(bool allowInitialize)
 {
     db::Schema s;
     s.applicationId = kApplicationId;
-    s.steps = {kSchemaV1, dev::kStep2, dev::kStep3, dev::kStep4, dev::kStep5, dev::kStep6};
+    s.steps = {kSchemaV1, dev::kStep2, dev::kStep3, dev::kStep4, dev::kStep5, dev::kStep6, dev::kStep7};
     s.allowInitialize = allowInitialize;
     return s;
 }

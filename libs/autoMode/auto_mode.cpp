@@ -103,7 +103,8 @@ std::vector<std::optional<double>> coordinateSpans(const std::vector<poletable::
             const auto n1 = poletable::numberValue(row, poletable::kNorth);
             const auto e1 = poletable::numberValue(row, poletable::kEast);
             if (n0 && e0 && n1 && e1) {
-                const double d = std::hypot(*n1 - *n0, *e1 - *e0);
+                // Avrundat till centimeter, så att beräkningen använder det tal som visas.
+                const double d = std::round(std::hypot(*n1 - *n0, *e1 - *e0) * 100.0) / 100.0;
                 if (d > 0)
                     spans[i] = d;  // samma punkt två gånger ger inget spann
             }
@@ -204,16 +205,18 @@ std::vector<std::string> duplicatePoles(const std::vector<poletable::PoleRow>& r
 
 namespace {
 
-// Sant när två fält i samma kolumn är lika: tal som tal (tomt bara mot tomt), text exakt.
-bool sameField(const poletable::PoleRow& a, const poletable::PoleRow& b, int column) {
-    const std::string& x = poletable::field(a, column);
-    const std::string& y = poletable::field(b, column);
+// Sant när fältet i efter är lika med sitt fält i före (Av Fas2 och Fas3 mot Av): tal som tal
+// (tomt bara mot tomt), text exakt.
+bool sameField(const poletable::PoleRow& after, const poletable::PoleRow& before, int column) {
+    const int source = poletable::beforeField(column);
+    const std::string& x = poletable::field(after, column);
+    const std::string& y = poletable::field(before, source);
     if (!poletable::isNumberColumn(column))
         return x == y;
     if (x.empty() || y.empty())
         return x.empty() && y.empty();
-    const std::optional<double> nx = poletable::numberValue(a, column);
-    const std::optional<double> ny = poletable::numberValue(b, column);
+    const std::optional<double> nx = poletable::numberValue(after, column);
+    const std::optional<double> ny = poletable::numberValue(before, source);
     if (nx && ny)
         return *nx == *ny;
     return x == y;
@@ -249,7 +252,7 @@ std::vector<RowCompare> compareAfter(const std::vector<poletable::PoleRow>& befo
             cmp.beforeRow = it->second.front();
             const poletable::PoleRow& match = before[static_cast<std::size_t>(cmp.beforeRow)];
             cmp.state = RowState::Same;
-            for (int c = 0; c < poletable::kColumnCount; ++c) {
+            for (int c = 0; c < poletable::kFieldCount; ++c) {
                 if (!sameField(row, match, c)) {
                     cmp.changed[static_cast<std::size_t>(c)] = true;
                     cmp.state = RowState::Changed;
@@ -311,6 +314,24 @@ TableMarks tableMarks(const std::vector<poletable::PoleRow>& rows, const std::ve
         }
     }
     return marks;
+}
+
+// Återställningen av en cell: bara en Changed-rad med ett fält 1-9 som skiljer sig ger en ändring,
+// och texten är före-cellens text som den står (Av för Av Fas2 och Fas3). Stolpnr (fält 0) är
+// nyckeln och återställs aldrig.
+std::optional<poletable::Edit> restoreFromBefore(const std::vector<poletable::PoleRow>& before,
+                                                 const std::vector<RowCompare>& compare, int row, int column) {
+    if (row < 0 || row >= static_cast<int>(compare.size()))
+        return std::nullopt;
+    if (column <= poletable::kPole || column >= poletable::kFieldCount)
+        return std::nullopt;
+    const RowCompare& cmp = compare[static_cast<std::size_t>(row)];
+    if (cmp.state != RowState::Changed || !cmp.changed[static_cast<std::size_t>(column)])
+        return std::nullopt;
+    if (cmp.beforeRow < 0 || cmp.beforeRow >= static_cast<int>(before.size()))
+        return std::nullopt;
+    const poletable::PoleRow& source = before[static_cast<std::size_t>(cmp.beforeRow)];
+    return poletable::Edit{row, column, poletable::field(source, poletable::beforeField(column))};
 }
 
 } // namespace kalkyl::automode

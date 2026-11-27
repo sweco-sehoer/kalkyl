@@ -33,6 +33,8 @@
 - 💡 Sammanslagning (Sammanslagning.xlsm) som egen beräkningsmodul.
 - 💡 GlazeUI: ett val för talceller i DataGrid som visar talet med de decimaler som skrevs. Då kan Stolptabell före
   svälja bokstäver redan vid tangenttrycket. Se doc/plans/archive/2026-11-26_Stolptabell_fore.md, 3.2.
+- 💡 GlazeUI: en publik fråga om cellen (rad och kolumn) under en punkt i DataGrid, så att `GridProbe` i `libs/poleGrid` kan tas bort.
+  Se doc/plans/archive/2026-11-27_Filter_stolptabell_efter.md, risk 12.
 - 💡 `postIfAlive` finns i fyra filer (Normalspann, Linberäkning, `libs/sheetGrid` och `libs/poleGrid`). Samla den på ett gemensamt ställe.
 - 💡 Normalspannsformuläret använder `libs/sheetGrid` (`growRows`, `headerTakesRow = false`) för markering och urklipp,
   som Linberäkning och Stolptabell före.

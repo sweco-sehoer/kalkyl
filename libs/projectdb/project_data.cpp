@@ -1041,11 +1041,14 @@ std::string_view poleTableSql(Stage stage)
     return stage == Stage::Before ? "pole_before" : "pole_after";
 }
 
-// Läser stolptabellen för skedet i tabellens ordning. NULL i en talkolumn blir tom text.
+// Läser stolptabellen för skedet i tabellens ordning. NULL i en talkolumn blir tom text. Efter har
+// dessutom Av Fas2 och Fas3 (av2, av3); i före blir de tomma.
 Result<std::vector<poletable::PoleRow>> readPoles(db::Database& d, Stage stage)
 {
-    const std::string sql = "SELECT pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl FROM " +
-                            std::string(poleTableSql(stage)) + " ORDER BY position";
+    const bool phases = stage == Stage::After;
+    const std::string sql = std::string("SELECT pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl") +
+                            (phases ? ", av2, av3" : "") + " FROM " + std::string(poleTableSql(stage)) +
+                            " ORDER BY position";
     auto stmt = prepared(d, sql, {});
     if (!stmt)
         return stmt.error();
@@ -1067,6 +1070,10 @@ Result<std::vector<poletable::PoleRow>> readPoles(db::Database& d, Stage stage)
         row.east = s.text(5);
         row.height = s.text(6);
         row.lkl = s.text(7);
+        if (phases) {
+            row.av2 = s.text(8);
+            row.av3 = s.text(9);
+        }
         rows.push_back(std::move(row));
     }
     return rows;
@@ -2215,22 +2222,27 @@ Result<void> validatePoleRows(Stage stage, const std::vector<poletable::PoleRow>
         if (const auto bad = poletable::firstInvalidColumn(rows[i]))
             return makeError(ErrorCode::Invalid,
                              std::string(poleTableName(stage)) + " har ett ogiltigt tal på rad " +
-                                 std::to_string(i + 1) + " i kolumnen " + poletable::columnName(*bad) +
+                                 std::to_string(i + 1) + " i kolumnen " +
+                                 (stage == Stage::After ? poletable::afterColumnName(*bad)
+                                                        : poletable::columnName(*bad)) +
                                  ".");
     }
     return {};
 }
 
 // Ersätter raderna i stolptabellen för skedet: tömmer tabellen och skriver poletable::rowsToSave(rows)
-// med positionerna 0, 1, 2 ... Tomma tal binds som NULL. Ingen validering och ingen synkning här.
+// med positionerna 0, 1, 2 ... Tomma tal binds som NULL. Efter får också Av Fas2 och Fas3 (av2,
+// av3); före har inga sådana kolumner. Ingen validering och ingen synkning här.
 Result<void> writePoleRows(db::Database& d, Stage stage, const std::vector<poletable::PoleRow>& rows)
 {
     const std::string table(poleTableSql(stage));
+    const bool phases = stage == Stage::After;
     if (auto r = run(d, "DELETE FROM " + table, {}); !r)
         return r;
-    const std::string insert = "INSERT INTO " + table +
-                               "(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl) "
-                               "VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
+    const std::string insert =
+        "INSERT INTO " + table + "(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl" +
+        (phases ? std::string(", av2, av3) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)")
+                : std::string(") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"));
     const std::vector<poletable::PoleRow> toSave = poletable::rowsToSave(rows);
     std::int64_t position = 0;
     for (const poletable::PoleRow& row : toSave) {
@@ -2239,12 +2251,18 @@ Result<void> writePoleRows(db::Database& d, Stage stage, const std::vector<polet
             const std::string& text = poletable::field(row, column);
             return text.empty() ? Arg{nullptr} : Arg{std::string_view(text)};
         };
-        if (auto r = run(d, insert,
-                         {position, std::string_view(row.pole), number(poletable::kAv),
-                          number(poletable::kAh), number(poletable::kSpan),
-                          number(poletable::kNorth), number(poletable::kEast),
-                          number(poletable::kHeight), std::string_view(row.lkl)});
-            !r)
+        auto r = phases ? run(d, insert,
+                              {position, std::string_view(row.pole), number(poletable::kAv),
+                               number(poletable::kAh), number(poletable::kSpan),
+                               number(poletable::kNorth), number(poletable::kEast),
+                               number(poletable::kHeight), std::string_view(row.lkl),
+                               number(poletable::kAv2), number(poletable::kAv3)})
+                        : run(d, insert,
+                              {position, std::string_view(row.pole), number(poletable::kAv),
+                               number(poletable::kAh), number(poletable::kSpan),
+                               number(poletable::kNorth), number(poletable::kEast),
+                               number(poletable::kHeight), std::string_view(row.lkl)});
+        if (!r)
             return r;
         ++position;
     }
@@ -2312,16 +2330,16 @@ ON CONFLICT(stage) DO UPDATE SET
     });
 }
 
-// Gör Stolptabell efter till en kopia av före: raderna, sträckorna och läget. Det som fanns i
-// efter försvinner, och de automatiska beräkningarna synkas i samma transaktion.
+// Gör Stolptabell efter till en kopia av före: raderna (Av i alla tre faserna), sträckorna och
+// läget. Det som fanns i efter försvinner, och de automatiska beräkningarna synkas i samma transaktion.
 Result<void> copyBeforeToAfter(ProjectDb& p)
 {
     return write(p, [&](db::Database& d) -> Result<void> {
         if (auto r = run(d, "DELETE FROM pole_after", {}); !r)
             return r;
         if (auto r = run(d, R"sql(
-INSERT INTO pole_after(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl)
-SELECT position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl FROM pole_before
+INSERT INTO pole_after(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl, av2, av3)
+SELECT position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl, av, av FROM pole_before
 )sql",
                          {});
             !r)

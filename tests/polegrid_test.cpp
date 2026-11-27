@@ -167,16 +167,17 @@ void testDeleteColumn()
     PoleLooks looks = changedLooks();
     looks.marks.issues = {{0, pt::kSpan, "fel"}};
     looks.marks.rowNotes = {"Faslinan börjar här."};
-    const CellLook del = cellLook(looks, 0, polegrid::kDeleteColumn, 2);
+    const int kDelete = -1;   // radera-kolumnen har inget fält
+    const CellLook del = cellLook(looks, 0, kDelete, 2);
     CHECK(hasColor(del, gfx::Color{210, 90, 140, 64}));
     CHECK(del.toolTip.empty());
     CHECK(!del.flag);
-    CHECK(hasColor(cellLook(looks, 1, polegrid::kDeleteColumn, 2), gfx::Color{210, 90, 140, 52}));
-    CHECK(hasColor(cellLook(PoleLooks{}, 0, polegrid::kDeleteColumn, 2), gfx::Color{220, 160, 40, 64}));
+    CHECK(hasColor(cellLook(looks, 1, kDelete, 2), gfx::Color{210, 90, 140, 52}));
+    CHECK(hasColor(cellLook(PoleLooks{}, 0, kDelete, 2), gfx::Color{220, 160, 40, 64}));
 
     PoleLooks added;
     added.compare = {RowCompare{RowState::New, -1, {}}};
-    CHECK(hasColor(cellLook(added, 0, polegrid::kDeleteColumn, 1), gfx::Color{70, 170, 90, 64}));
+    CHECK(hasColor(cellLook(added, 0, kDelete, 1), gfx::Color{70, 170, 90, 64}));
 }
 
 // Index utanför listorna ger bara radens grundton, så att en tabell som hunnit ändras före nästa

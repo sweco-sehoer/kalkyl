@@ -13,7 +13,7 @@ Importens rådata (`pole_import*`, `importPolesBefore` och `lastPoleImport`) st�
 |---|---|
 | `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform`, `kalkyl_ancalc`, `kalkyl_conductor`, `kalkyl_linecalc`, `kalkyl_poletable` och `kalkyl_automode` (PUBLIC, eftersom `project_data.h` inkluderar dem), `kalkyl_tabletext` och `kalkyl_version`). Testet `projectdb` ligger i `tests/` |
 | `project_db.h` | `ProjectDb`, `OpenOptions`, `Snapshot`, `Access`, `defaultWorkDir`, `withExtension` och `cleanWorkDir` |
-| `dev_migration.h` | Utvecklingsmigreringen: stegen efter v0.1.0 (`dev::kStep2` med linkopiorna, Dokumentation och normalspannet, `dev::kStep3` med linberäkningarna, `dev::kStep4` med Stolptabell före, `dev::kStep5` med Stolptabell efter, automatiskt läge och märkningen av de automatiska beräkningarna, `dev::kStep6` med importens rådata `pole_import*`). Töms vid 1.0.0 |
+| `dev_migration.h` | Utvecklingsmigreringen: stegen efter v0.1.0 (`dev::kStep2` med linkopiorna, Dokumentation och normalspannet, `dev::kStep3` med linberäkningarna, `dev::kStep4` med Stolptabell före, `dev::kStep5` med Stolptabell efter, automatiskt läge och märkningen av de automatiska beräkningarna, `dev::kStep6` med importens rådata `pole_import*`, `dev::kStep7` med Av per fas i `pole_after`). Töms vid 1.0.0 |
 | `project_db.cpp` | Schemat (steg 1, v0.1.0, och stegen ur `dev_migration.h`), `create`, `open` med schemakontroll, lås, städning vid fel, `snapshot`/`publish`/`published`, revisionen och `close` |
 | `project_data.h` | Dataskrivningarna och läsningarna: `DocValue`, `AutoOrigin`, `NormalSpan`, `LineCalc`, `Wire`, `Stage`, `docValues`, `setDocValue`, linkopiorna, beräkningarna, kopplingarna, upplösningen av linberäkningarna, `calculateSpan`, texterna (`poleTableName`, `autoLineWord`, `autoLineLabel`), stolptabellerna (`poles`, `setPoles`, `polesBefore`, `setPolesBefore`), automatiskt läge (`AutoSettings`, `autoSettings`, `setAutoSettings`, `copyBeforeToAfter`) och importen av en stolptabell (`importPolesBefore`, `lastPoleImport`) |
 | `project_data.cpp` | Implementationen av `project_data.h`: SQL i råa strängliteraler, en transaktion per skrivning, synkningen `syncAutoCalcs`, `writePoleRows` (delas av `setPoles` och `importPolesBefore`) och rådataposten |
@@ -41,13 +41,16 @@ Importens rådata (`pole_import*`, `importPolesBefore` och `lastPoleImport`) st�
   Steg 3 är committat i v0.3.0 och ändras aldrig.
 - **Steg 4** (`dev::kStep4`) lägger till `pole_before`, Stolptabell före. Steg 4 är committat i v0.4.0 och ändras aldrig.
 - **Steg 5** (`dev::kStep5`) lägger till `pole_after` (Stolptabell efter), `auto_mode` och `auto_calc`.
-- **Steg 6** (`dev::kStep6`) lägger till de fyra tabellerna för importens rådata (`pole_import`, `pole_import_column`, `pole_import_row` och `pole_import_cell`). `kSchemaVersion` = 6.
-  Steg 5 och 6 är inte committade men får inte längre slås ihop eller ändras: projekt med user_version 5 finns redan. Nya ändringar före nästa commit blir ett nytt steg sist.
+- **Steg 6** (`dev::kStep6`) lägger till de fyra tabellerna för importens rådata (`pole_import`, `pole_import_column`, `pole_import_row` och `pole_import_cell`).
+  Steg 5 och 6 är committade i v0.5.0 och ändras aldrig.
+- **Steg 7** (`dev::kStep7`) ger `pole_after` kolumnerna `av2` och `av3` (Av Fas2 och Fas3; `av` är Fas1), och de befintliga raderna får Av i alla tre faserna. `kSchemaVersion` = 7.
+  Steg 7 är inte committat och kan ändras tills det committas, utom när användaren redan har projekt med user_version 7; då blir nya ändringar ett nytt steg sist.
   Schemat har 17 tabeller, och `kExpectedTablesSql` och `kExpectedTableCount` (17) i `project_db.cpp` räknar alla.
   Ett projekt från en äldre version migreras när det öppnas och sparas med det nya schemat vid nästa publicering. Migreringen kör ingen synkning: läget är av och det finns inga automatiska beräkningar.
   Migreringstesten är `testMigrateFromV010`, `testMigrateFromV020`, `testMigrateFromV030` (filen byggd som i v0.3.2, user_version 3) och `testMigrateFromV040` (filen byggd som i v0.4.0, user_version 4, med läget på i efter efter öppningen).
   Alla räknar 17 tabeller (`kSeventeenTablesSql`), och `testMigrateFromV040` kontrollerar också att `pole_import` är tom och att `lastPoleImport` ger tomt svar.
   `testMigrateFromStep5` bygger en fil med steg 1–5 och user_version 5 (13 tabeller, med Stolptabell efter och inställningen för automatiskt läge) och kontrollerar att steg 6 läggs till och att allt finns kvar.
+  `testMigrateFromStep6` bygger en fil med steg 1–6 och user_version 6 och kontrollerar att Av Fas2 och Fas3 får Av (NULL förblir tomt), att faserna sparas och läses tillbaka och att `copyBeforeToAfter` ger Av i alla tre.
 - **Schemakontroll:** `open` räknar tabellerna i `kExpectedTablesSql` efter `migrate` och före `quickCheck`. Saknas någon (skadad fil) blir felet `NotADatabase`
   med texten "Projektfilen saknar delar som den här versionen av Kalkyl behöver. Filen är skadad:" följd av en radbrytning och sökvägen.
   Låset och arbetskopian städas som vid andra fel, och texten går inte genom `relabel`. Listan hålls lika med schemat.
@@ -84,10 +87,10 @@ Importens rådata (`pole_import*`, `importPolesBefore` och `lastPoleImport`) st�
 
 ## Stolptabell efter och automatiskt läge
 
-- **Stolptabellerna:** `pole_after` är en kopia av `pole_before`. `poles(p, stage)` och `setPoles(p, stage, rows)` gäller båda, och `polesBefore` och `setPolesBefore` är genvägar för före.
+- **Stolptabellerna:** `pole_after` har `pole_before`s kolumner och dessutom `av2` och `av3` (Av Fas2 och Fas3, `PoleRow::av2`, `av3`). `poles(p, stage)` och `setPoles(p, stage, rows)` gäller båda och läser och skriver faserna bara i efter, och `polesBefore` och `setPolesBefore` är genvägar för före.
   Felet för ett ogiltigt tal börjar med tabellens namn ("Stolptabell före har ett ogiltigt tal på rad <n> i kolumnen <namn>.").
 - **Inställningen:** `auto_mode` har en rad per skede med läget och tre sträckor (Stolpnr, trimmad, `''` = inte vald). `autoSettings`/`setAutoSettings` läser och skriver den, och utan rad är läget av.
-  `copyBeforeToAfter` ersätter allt i efter (rader, sträckor och läge) med före i EN transaktion.
+  `copyBeforeToAfter` ersätter allt i efter (rader, sträckor och läge) med före i EN transaktion, och Av blir Av i alla tre faserna.
 - **De automatiska beräkningarna är lagrade:** vanliga rader i `normal_span` (stolparna, förvalda gränser) och `line_calc` (kopplad till linberäkningsraden, indata `newLineInput()`), märkta av `auto_calc`.
   Resultatet lagras inte, aₙ räknas ur stolparna (`calculateSpan`) och linan, aₙ, σ₀, min och max löses upp vid läsningen som för en kopplad beräkning.
 - **`auto_calc`:** en rad per skede och lina som någon gång har varit automatisk, med de reserverade id:na (`span_id`, `calc_id`) och sträckans läsning (`first_row`, `last_row`, `issue`).

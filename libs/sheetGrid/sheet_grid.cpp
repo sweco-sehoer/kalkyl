@@ -44,6 +44,19 @@ bool isSkipRow(const SheetShape& shape, int row)
     return shape.skipRow && shape.skipRow(row);
 }
 
+// Sant när raden står för dolda rader enligt formen (filtrets grå rader).
+bool isHiddenRow(const SheetShape& shape, int row)
+{
+    return shape.hiddenRow && shape.hiddenRow(row);
+}
+
+// Sant när raden är passiv: en tomrad eller en dold rad. Passiva rader markeras, målas och tar
+// emot inget.
+bool isPassiveRow(const SheetShape& shape, int row)
+{
+    return isSkipRow(shape, row) || isHiddenRow(shape, row);
+}
+
 // Sant när cellen tar emot inklistring och Delete.
 bool isInputCell(const SheetShape& shape, int row, int column)
 {
@@ -69,12 +82,12 @@ struct State {
 };
 
 // Målar om en cell: markeringens färg om den ligger i en utökad markering, annars grundfärgen.
-// Tomrader och kolumnerna före firstColumn (radrubriken) målas aldrig.
+// Passiva rader och kolumnerna före firstColumn (radrubriken) målas aldrig.
 void paintCellOf(const State& s, int row, int column)
 {
     if (row < 0 || row >= std::min(s.shape.rowCount, s.grid.rowCount()))
         return;
-    if (column < s.shape.firstColumn || column >= s.shape.columnCount || isSkipRow(s.shape, row))
+    if (column < s.shape.firstColumn || column >= s.shape.columnCount || isPassiveRow(s.shape, row))
         return;
     const std::optional<gfx::Color> color = inExtendedSelection(s.anchor, s.extent, row, column)
                                                 ? std::optional<gfx::Color>(kSelectColor)
@@ -131,7 +144,7 @@ SheetPaste planSheetPaste(CellPos anchor, const std::vector<std::vector<std::str
         if (row < 0 || (!shape.growRows && row >= shape.rowCount) || column < shape.firstColumn ||
             column >= shape.columnCount)
             return false;
-        if (isSkipRow(shape, row))
+        if (isPassiveRow(shape, row))
             return false;
         return isInputCell(shape, row, column);
     };
@@ -210,21 +223,24 @@ CellRect rectOf(CellPos a, CellPos b)
             std::max(a.column, b.column)};
 }
 
-// Klampar till raderna och kolumnerna från firstColumn. En tomrad flyttas ett steg i riktningen
-// step, och åt andra hållet när det inte finns någon rad kvar.
+// Klampar till raderna och kolumnerna från firstColumn. En passiv rad (tomrad eller dold rad)
+// flyttas ett steg i riktningen step, och åt andra hållet när det inte finns någon rad kvar.
 CellPos clampPos(CellPos pos, const SheetShape& shape, int step)
 {
     pos.row = std::clamp(pos.row, 0, std::max(0, shape.rowCount - 1));
     pos.column = std::clamp(pos.column, std::min(shape.firstColumn, std::max(0, shape.columnCount - 1)),
                             std::max(0, shape.columnCount - 1));
-    if (!isSkipRow(shape, pos.row))
+    if (!isPassiveRow(shape, pos.row))
         return pos;
+    // Närmaste aktiva rad i riktningen, och annars närmaste åt andra hållet. Flera passiva rader
+    // i följd (en grå rad bredvid en tomrad) hoppas över.
     const int dir = step < 0 ? -1 : 1;
     for (const int d : {dir, -dir}) {
-        const int next = pos.row + d;
-        if (next >= 0 && next < shape.rowCount && !isSkipRow(shape, next)) {
-            pos.row = next;
-            return pos;
+        for (int next = pos.row + d; next >= 0 && next < shape.rowCount; next += d) {
+            if (!isPassiveRow(shape, next)) {
+                pos.row = next;
+                return pos;
+            }
         }
     }
     return pos;
@@ -239,6 +255,12 @@ bool isBlock(const std::string& clip)
 
 // Förvalet: inga egna poster i snabbmenyn.
 void SheetHost::addMenuItems(glaze::Menu&, const CellRect&) {}
+
+// Förvalet: värden tar inte över inklistringen, och SheetGrid klistrar in själv.
+bool SheetHost::pasteBlock(const std::vector<std::vector<std::string>>&, CellPos)
+{
+    return false;
+}
 
 // Markeringen börjar i första cellen efter radrubriken.
 SheetGrid::SheetGrid(glaze::DataGrid& grid, SheetShape shape, SheetHost& host)
@@ -366,7 +388,7 @@ void SheetGrid::contextMenu(glaze::ContextMenuArgs& e)
     int row = -1;
     if (const auto p = grid_.fromWindow(gfx::Pointf{e.x, e.y}))
         row = grid_.rowAt(p->x, p->y);
-    if (row >= 0 && !isSkipRow(shape_, row)) {
+    if (row >= 0 && !isPassiveRow(shape_, row)) {
         const CellRect rect = rectOf(anchor_, extent_);
         if (row < rect.row0 || row > rect.row1) {
             const int column = std::max(shape_.firstColumn, grid_.currentColumn());
@@ -459,13 +481,15 @@ void SheetGrid::select(CellPos anchor, CellPos extent)
 }
 
 // Kopierar markeringen som tabbseparerad text. Tal skrivs som fönstret skriver dem, och en
-// tomrad blir en tom rad. Statusraden berättar vad som kopierades.
+// tomrad blir en tom rad. En dold rad hoppas över helt. Statusraden berättar vad som kopierades.
 void SheetGrid::copySelection()
 {
     syncRowCount();
     const CellRect rect = rectOf(anchor_, extent_);
     std::vector<std::vector<std::string>> rows;
     for (int r = rect.row0; r <= rect.row1; ++r) {
+        if (isHiddenRow(shape_, r))
+            continue;
         std::vector<std::string> fields;
         for (int c = rect.column0; c <= rect.column1; ++c)
             fields.push_back(isSkipRow(shape_, r) ? std::string() : host_.copyText(r, c));
@@ -476,8 +500,9 @@ void SheetGrid::copySelection()
                      std::to_string(rect.column1 - rect.column0 + 1) + " celler");
 }
 
-// Klistrar in urklippet vid markeringens övre vänstra cell. En inklistring som avbryts visas i
-// en ruta och ändrar inget. Annars skrivs ändringarna som en och markeringen blir blocket.
+// Klistrar in urklippet vid markeringens övre vänstra cell. Värden får först ta över inklistringen
+// (SheetHost::pasteBlock). En inklistring som avbryts visas i en ruta och ändrar inget. Annars
+// skrivs ändringarna som en och markeringen blir blocket.
 void SheetGrid::pasteAtSelection()
 {
     syncRowCount();
@@ -487,28 +512,45 @@ void SheetGrid::pasteAtSelection()
         return;
     }
     const CellRect rect = rectOf(anchor_, extent_);
+    if (host_.pasteBlock(block, {rect.row0, rect.column0}))
+        return;
     const SheetPaste paste = planSheetPaste({rect.row0, rect.column0}, block, shape_);
     if (paste.rejected) {
-        if (glaze::AppWindow* owner = grid_.appWindow())
-            glaze::messageBox(*owner, *paste.rejected, "Klistra in", glaze::MessageBoxButtons::OK,
-                              glaze::MessageBoxType::Warning);
-        else
-            glaze::messageBox(*paste.rejected, "Klistra in", glaze::MessageBoxButtons::OK,
-                              glaze::MessageBoxType::Warning);
+        showPasteRejected(grid_, *paste.rejected);
         return;
     }
     if (paste.edits.empty()) {
-        host_.showStatus("Inget att klistra in här. Markera en inmatningscell.");
+        host_.showStatus(nothingToPasteText());
         return;
     }
     host_.applyEdits(paste.edits);
     syncRowCount();
     select({paste.area.row0, paste.area.column0}, {paste.area.row1, paste.area.column1});
-    std::string status = "Klistrade in " + std::to_string(block.size() - (paste.skippedHeader ? 1u : 0u)) +
-                         " rader";
+    host_.showStatus(pasteStatus(paste, block.size()));
+}
+
+// Antalet inklistrade rader är blockets rader utan en överhoppad rubrikrad.
+std::string pasteStatus(const SheetPaste& paste, std::size_t blockRows)
+{
+    std::string status = "Klistrade in " + std::to_string(blockRows - (paste.skippedHeader ? 1u : 0u)) + " rader";
     if (paste.skippedHeader)
         status += " (rubrikraden hoppades över)";
-    host_.showStatus(status);
+    return status;
+}
+
+// Inget fält landade i en inmatningscell.
+std::string nothingToPasteText()
+{
+    return "Inget att klistra in här. Markera en inmatningscell.";
+}
+
+// Rutan visas över tabellens fönster, eller fristående när tabellen inte sitter i något fönster.
+void showPasteRejected(glaze::DataGrid& grid, const std::string& text)
+{
+    if (glaze::AppWindow* owner = grid.appWindow())
+        glaze::messageBox(*owner, text, "Klistra in", glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Warning);
+    else
+        glaze::messageBox(text, "Klistra in", glaze::MessageBoxButtons::OK, glaze::MessageBoxType::Warning);
 }
 
 // Läser tabellens aktuella cell. Med extend utökas markeringen från ankaret, annars blir
@@ -527,15 +569,15 @@ void SheetGrid::syncSelection(bool extend)
         setSelectionOf(s, {row, column}, {row, column}, false, 1);
 }
 
-// Tömmer indatacellerna i markeringen med en ändring till fönstret. Tomrader och celler som
-// inte är indata rörs inte.
+// Tömmer indatacellerna i markeringen med en ändring till fönstret. Passiva rader (tomrader och
+// dolda rader) och celler som inte är indata rörs inte.
 void SheetGrid::clearSelectionCells()
 {
     syncRowCount();
     const CellRect rect = rectOf(anchor_, extent_);
     std::vector<CellEdit> edits;
     for (int r = rect.row0; r <= rect.row1; ++r) {
-        if (isSkipRow(shape_, r))
+        if (isPassiveRow(shape_, r))
             continue;
         for (int c = rect.column0; c <= rect.column1; ++c)
             if (isInputCell(shape_, r, c))

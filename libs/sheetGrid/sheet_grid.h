@@ -36,6 +36,10 @@ struct SheetShape {
     // En överhoppad rubrikrad tar en rad i tabellen (true, som arket Linberäkning) eller ingen,
     // så att datat börjar på ankarraden (false, som normalspannet och stolptabellen).
     bool headerTakesRow = true;
+    // Rader som står för dolda rader (filtrets grå rader). Som skipRow markeras, målas och tar de
+    // emot inget, och kopieringen hoppar över dem helt. En värd som vill klistra in i raderna bakom
+    // dem tar inklistringen själv (SheetHost::pasteBlock). Tom = inga.
+    std::function<bool(int row)> hiddenRow;
 };
 
 // Ett planerat inklistrat block: ändringarna, om en rubrikrad hoppades över, och blockets
@@ -52,6 +56,17 @@ struct SheetPaste {
 // Var ett inklistrat block hamnar (planen fas 2, 5.2). Ren funktion utan fönster.
 SheetPaste planSheetPaste(CellPos anchor, const std::vector<std::vector<std::string>>& block,
                           const SheetShape& shape);
+
+// Statustexten efter en inklistring av ett block med blockRows rader: "Klistrade in N rader", och
+// "(rubrikraden hoppades över)" när en rubrikrad hoppades över. Delas av SheetGrid och värdar som
+// klistrar in själva (SheetHost::pasteBlock).
+std::string pasteStatus(const SheetPaste& paste, std::size_t blockRows);
+
+// Statustexten när inget fält i blocket landade i en inmatningscell.
+std::string nothingToPasteText();
+
+// Rutan "Klistra in" med texten när en inklistring avbröts, över tabellens fönster när det finns.
+void showPasteRejected(glaze::DataGrid& grid, const std::string& text);
 
 // Rektangeln mellan två celler, med rad0 <= rad1 och kolumn0 <= kolumn1.
 CellRect rectOf(CellPos a, CellPos b);
@@ -76,6 +91,10 @@ public:
     virtual void applyEdits(const std::vector<CellEdit>& edits) = 0;
     // Egna poster sist i snabbmenyn, efter en separator. Tomt som förval.
     virtual void addMenuItems(glaze::Menu& menu, const CellRect& selection);
+    // Inklistringen av ett block vid ankaret, markeringens övre vänstra cell. Svarar true när värden
+    // har tagit hand om den själv (planeringen, ändringarna, markeringen och statusraden), och då gör
+    // SheetGrid inget mer. Förvalet svarar false, och SheetGrid planerar och klistrar in själv.
+    virtual bool pasteBlock(const std::vector<std::vector<std::string>>& block, CellPos anchor);
     // En kort text i statusraden ("Kopierade 3 × 2 celler").
     virtual void showStatus(const std::string& text) = 0;
 };

@@ -306,6 +306,90 @@ void testHelpers()
     CHECK(sheetgrid::isBlock("a" + kLf + "b" + kLf));
 }
 
+// En form med sex rader och tre kolumner där rad 2 är en dold rad (en grå rad i filtret).
+SheetShape hiddenShape()
+{
+    SheetShape shape = growShape();
+    shape.rowCount = 6;
+    shape.hiddenRow = [](int row) { return row == 2; };
+    return shape;
+}
+
+// En värd som bara svarar på de rena frågorna. Den tar inte över inklistringen.
+class PlainHost : public sheetgrid::SheetHost {
+public:
+    std::string copyText(int, int) const override { return std::string(); }
+    std::optional<gfx::Color> baseColor(int, int) const override { return std::nullopt; }
+    void applyEdits(const std::vector<CellEdit>&) override {}
+    void showStatus(const std::string&) override {}
+};
+
+// En dold rad tar emot inget men räknas med, så ett block landar i följd bakom den. Klampningen
+// hoppar över den, och värdens pasteBlock svarar false som förval.
+void testHiddenRows()
+{
+    const SheetShape shape = hiddenShape();
+
+    // Två rader ovanför den dolda raden.
+    const SheetPaste two = sheetgrid::planSheetPaste({0, 0}, {{"1"}, {"2"}}, shape);
+    CHECK(!two.rejected);
+    CHECK(two.edits.size() == 2u);
+    CHECK(findEdit(two, 0, 0) && findEdit(two, 1, 0));
+
+    // Tre rader: den tredje hamnar i den dolda raden och ignoreras utan att avbryta.
+    const SheetPaste three = sheetgrid::planSheetPaste({0, 0}, {{"1"}, {"2"}, {"3"}}, shape);
+    CHECK(!three.rejected);
+    CHECK(three.edits.size() == 2u);
+    CHECK(findEdit(three, 0, 0) && findEdit(three, 1, 0));
+    CHECK(findEdit(three, 2, 0) == nullptr);
+
+    // Ett enda värde i raden före.
+    const SheetPaste single = sheetgrid::planSheetPaste({1, 0}, {{"7"}}, shape);
+    CHECK(single.edits.size() == 1u);
+    CHECK(findEdit(single, 1, 0) && findEdit(single, 1, 0)->text == "7");
+
+    // Ankaret bakom den dolda raden: fem rader landar i rad 3-7 och tabellen behöver åtta rader.
+    const SheetPaste below = sheetgrid::planSheetPaste({3, 0}, {{"1"}, {"2"}, {"3"}, {"4"}, {"5"}}, shape);
+    CHECK(!below.rejected);
+    CHECK(below.edits.size() == 5u);
+    for (int r = 3; r <= 7; ++r)
+        CHECK(findEdit(below, r, 0) != nullptr);
+    CHECK(below.rowsNeeded == 8);
+
+    // Rubrikrad och två datarader från rad 1: datat hamnar i rad 1 och 2, och rad 2 är dold.
+    const SheetPaste header = sheetgrid::planSheetPaste({1, 0}, {{"Rubrik"}, {"1"}, {"2"}}, shape);
+    CHECK(!header.rejected);
+    CHECK(header.skippedHeader);
+    CHECK(header.edits.size() == 1u);
+    CHECK(findEdit(header, 1, 0) && findEdit(header, 1, 0)->text == "1");
+    CHECK(findEdit(header, 2, 0) == nullptr);
+
+    // Klampningen flyttar markeringen förbi den dolda raden i båda riktningarna.
+    CHECK(sheetgrid::clampPos({2, 0}, shape, 1).row == 3);
+    CHECK(sheetgrid::clampPos({2, 0}, shape, -1).row == 1);
+
+    // En tomrad och en dold rad i samma form: bara rad 0 och 2 tar emot.
+    SheetShape both = growShape();
+    both.rowCount = 6;
+    both.skipRow = [](int row) { return row == 1; };
+    both.hiddenRow = [](int row) { return row == 3; };
+    const SheetPaste mixed = sheetgrid::planSheetPaste({0, 0}, {{"1"}, {"2"}, {"3"}, {"4"}}, both);
+    CHECK(!mixed.rejected);
+    CHECK(mixed.edits.size() == 2u);
+    CHECK(findEdit(mixed, 0, 0) && findEdit(mixed, 2, 0));
+    CHECK(findEdit(mixed, 1, 0) == nullptr && findEdit(mixed, 3, 0) == nullptr);
+
+    // Två passiva rader i följd hoppas över vid klampning.
+    SheetShape twice = both;
+    twice.hiddenRow = [](int row) { return row == 2; };
+    CHECK(sheetgrid::clampPos({1, 0}, twice, 1).row == 3);
+    CHECK(sheetgrid::clampPos({2, 0}, twice, -1).row == 0);
+
+    // Förvalet för pasteBlock tar inte över inklistringen.
+    PlainHost host;
+    CHECK(!host.pasteBlock({{"1"}}, {0, 0}));
+}
+
 } // namespace
 
 int main()
@@ -319,6 +403,7 @@ int main()
     testGrowRows();
     testHeaderNoRow();
     testSingleValue();
+    testHiddenRows();
     if (g_failures == 0)
         std::cout << "sheetgrid: alla tester gick igenom" << std::endl;
     return g_failures == 0 ? 0 : 1;

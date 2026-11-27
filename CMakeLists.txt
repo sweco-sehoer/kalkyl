@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 # Projektets version (major.minor.patch) står bara här.
 # Den skrivs in i version.h vid konfigurering, se libs/version/CMakeLists.txt.
 project(Kalkyl
-        VERSION 0.5.0
+        VERSION 0.6.0
         DESCRIPTION "Luftledningsberäkningar"
         LANGUAGES C CXX)
 

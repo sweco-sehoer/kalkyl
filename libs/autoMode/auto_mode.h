@@ -34,8 +34,9 @@ RangeRows findRange(const std::vector<poletable::PoleRow>& rows, const PoleRange
 
 // Spannlängd föreg. räknad ur koordinaterna, en post per rad. En rad med tom spannlängd får det
 // vågräta avståndet √(ΔN² + ΔE²) till närmast föregående rad som inte är helt tom, när båda har
-// Koordinat N och E. En ifylld spannlängd, en helt tom rad, tabellens första stolpe (som inte
-// har någon föregående) och avståndet 0 (samma punkt två gånger) ger inget värde.
+// Koordinat N och E, avrundat till två decimaler. En ifylld spannlängd, en helt tom rad,
+// tabellens första stolpe (som inte har någon föregående) och avståndet 0 (samma punkt två
+// gånger) ger inget värde.
 std::vector<std::optional<double>> coordinateSpans(const std::vector<poletable::PoleRow>& rows);
 
 // Raderna first..last som normalspannets stolpar, i tabellens ordning: Stolpplats som Stpnr,
@@ -87,12 +88,13 @@ enum class RowState {
 struct RowCompare {
     RowState state = RowState::Empty;
     int beforeRow = -1;
-    std::array<bool, poletable::kColumnCount> changed{};
+    std::array<bool, poletable::kFieldCount> changed{};
     bool operator==(const RowCompare&) const = default;
 };
 
-// En jämförelse per rad i after. Talfälten jämförs som tal (44,10 och 44,1 är lika, och tomt är
-// bara lika med tomt), textfälten exakt.
+// En jämförelse per rad i after, för alla tio fälten. Av Fas2 och Fas3 jämförs med Av i före
+// (poletable::beforeField). Talfälten jämförs som tal (44,10 och 44,1 är lika, och tomt är bara
+// lika med tomt), textfälten exakt.
 std::vector<RowCompare> compareAfter(const std::vector<poletable::PoleRow>& before,
                                      const std::vector<poletable::PoleRow>& after);
 
@@ -103,7 +105,7 @@ struct NamedRange {
     PoleRange range;
 };
 
-// Ett fel i en cell: raden, kolumnen 0-7 och texten.
+// Ett fel i en cell: raden, fältet 0-9 och texten.
 struct CellIssue {
     int row = -1;
     int column = -1;
@@ -122,5 +124,12 @@ struct TableMarks {
 // En sträcka med fel ger inga markeringar, eftersom felet visas i panelen.
 TableMarks tableMarks(const std::vector<poletable::PoleRow>& rows, const std::vector<NamedRange>& ranges,
                       std::string_view table);
+
+// Ändringen som skriver tillbaka värdet ur Stolptabell före i cellen row, column i Stolptabell efter:
+// bara när raden är Changed och fältet skiljer sig (compare[row].changed), med före-cellens text som
+// den står (Av för Av Fas2 och Fas3). Tomt svar för Stolpnr (kPole), för ett fält utanför 0-9, för en
+// rad utanför compare och när cellen inte skiljer sig. compare är compareAfter(before, efter).
+std::optional<poletable::Edit> restoreFromBefore(const std::vector<poletable::PoleRow>& before,
+                                                 const std::vector<RowCompare>& compare, int row, int column);
 
 } // namespace kalkyl::automode

@@ -10,7 +10,7 @@ Planen är `doc/plans/archive/2026-11-26_Automatiskt_lage.md`, avsnitt 5–7.
 | Fil | Innehåll |
 |---|---|
 | `CMakeLists.txt` | Biblioteket `kalkyl_automode` (testet `automode` ligger i `tests/`) |
-| `auto_mode.h` | `PoleRange`, `RangeRows`, `findRange`, `coordinateSpans`, `spanPoles`, `RangeSpan`, `rangeSpan`, `RangeStatus`, `rangeStatus`, `duplicatePoles`, `RowState`, `RowCompare`, `compareAfter`, `NamedRange`, `CellIssue`, `TableMarks` och `tableMarks` |
+| `auto_mode.h` | `PoleRange`, `RangeRows`, `findRange`, `coordinateSpans`, `spanPoles`, `RangeSpan`, `rangeSpan`, `RangeStatus`, `rangeStatus`, `duplicatePoles`, `RowState`, `RowCompare`, `compareAfter`, `restoreFromBefore`, `NamedRange`, `CellIssue`, `TableMarks` och `tableMarks` |
 | `auto_mode.cpp` | Implementationen |
 
 ## Regler
@@ -21,7 +21,8 @@ Planen är `doc/plans/archive/2026-11-26_Automatiskt_lage.md`, avsnitt 5–7.
 - **Normalspannets stolpar** är raderna från första till sista stolpen, båda med, i tabellens ordning: Stolpnr, Spannlängd föreg. och Koordinat H (`poletable::numberValue`).
   Av, Ah och LKL används inte. Gränserna är `ancalc::SpanLimits{}`.
 - **Spannlängd ur koordinaterna** (`coordinateSpans`): en tom Spannlängd föreg. blir det vågräta avståndet √(ΔN² + ΔE²) till närmast föregående rad som inte är helt tom, när båda har N och E.
-  En ifylld spannlängd gäller alltid. Tabellens första stolpe och avståndet 0 ger inget värde. `spanPoles` använder värdet, och `libs/poleGrid` visar det i cellen.
-- **Jämförelsen** matchar bara på Stolpnr. Talfälten jämförs som tal (44,10 = 44,1, tomt bara mot tomt) och textfälten exakt.
+  Avståndet avrundas till två decimaler, så att normalspannet räknar med det tal som tabellen visar. En ifylld spannlängd gäller alltid. Tabellens första stolpe och avståndet 0 ger inget värde. `spanPoles` använder värdet, och `libs/poleGrid` visar det i cellen.
+- **Jämförelsen** matchar bara på Stolpnr och gäller alla tio fälten. Av Fas2 och Fas3 i efter jämförs med Av i före (`poletable::beforeField`), så en tom fas skiljer sig från ett ifyllt Av. Talfälten jämförs som tal (44,10 = 44,1, tomt bara mot tomt) och textfälten exakt.
   En Stolpnr som finns flera gånger i före ger `Ambiguous`.
+- **Återställningen** (`restoreFromBefore`): ger ändringen som skriver tillbaka före-cellens text som den står (en tom cell blir tom) i en enda cell. Bara en Changed-rad och ett fält 1-9 som skiljer sig (`changed`) ger en ändring, och Av Fas2 och Fas3 får Av ur före. Stolpnr är nyckeln och återställs aldrig, och New-, Empty-, Ambiguous- och Same-rader ger inget. `libs/poleGrid` använder den för snabbmenyns Kopiera från Stolptabell före.
 - **Markeringarna** (`tableMarks`): en sträcka med fel ger inga markeringar, eftersom felet visas i panelen. Dubbletter markeras alltid.

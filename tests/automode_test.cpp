@@ -44,10 +44,20 @@ std::vector<PoleRow> appendixA()
     };
 }
 
+// Raderna som de blir i Stolptabell efter vid en kopiering från före: Av i alla tre faserna.
+std::vector<PoleRow> asAfter(std::vector<PoleRow> rows)
+{
+    for (PoleRow& row : rows) {
+        row.av2 = row.av;
+        row.av3 = row.av;
+    }
+    return rows;
+}
+
 // Bilaga A efter ombyggnad: ST0104 har spannet 365 och ST0105 spannet 295.
 std::vector<PoleRow> appendixAfter()
 {
-    std::vector<PoleRow> rows = appendixA();
+    std::vector<PoleRow> rows = asAfter(appendixA());
     rows[4].spanM = "365";
     rows[5].spanM = "295";
     return rows;
@@ -186,6 +196,16 @@ void testCoordinateSpans()
     CHECK(!spans[6]);
     CHECK(!spans[7]);
     CHECK(coordinateSpans({}).empty());
+
+    // Avrundat till två decimaler: √2 m blir 1,41 m.
+    PoleRow a = poleRow("A", "", "");
+    a.north = "0";
+    a.east = "0";
+    PoleRow b = poleRow("B", "", "");
+    b.north = "1";
+    b.east = "1";
+    const auto rounded = coordinateSpans({a, b});
+    CHECK(rounded.size() == 2 && rounded[1] && *rounded[1] == 1.41);
 
     // spanPoles tar den tomma spannlängden ur koordinaterna och behåller den ifyllda.
     const std::vector<ancalc::SpanPole> poles = spanPoles(rows, 0, 4);
@@ -337,7 +357,7 @@ void testCompareAfter()
     before[2].lkl = "262/262";
     before[9].lkl = "262/262";
 
-    std::vector<PoleRow> after = before;
+    std::vector<PoleRow> after = asAfter(before);
     after[1].height = "44.10";                              // 44,10 mot 44,1: lika
     after[2].spanM = "999";                                 // ändrad spannlängd
     after[3].lkl = "255/262";                               // ändrad text, tom i före
@@ -355,7 +375,7 @@ void testCompareAfter()
 
     CHECK(cmp[1].state == RowState::Same);
     CHECK(cmp[1].beforeRow == 1);
-    CHECK(cmp[1].changed == std::array<bool, poletable::kColumnCount>{});
+    CHECK(cmp[1].changed == std::array<bool, poletable::kFieldCount>{});
 
     CHECK(cmp[2].state == RowState::Changed);
     CHECK(cmp[2].beforeRow == 2);
@@ -385,11 +405,21 @@ void testCompareAfter()
     // Före har ST0103 två gånger: raden i efter är osäker.
     std::vector<PoleRow> dupBefore = appendixA();
     dupBefore[8].pole = "ST0103";
-    const std::vector<RowCompare> amb = compareAfter(dupBefore, appendixA());
+    const std::vector<RowCompare> amb = compareAfter(dupBefore, asAfter(appendixA()));
     CHECK(amb[3].state == RowState::Ambiguous);
     CHECK(amb[3].beforeRow == -1);
     CHECK(amb[2].state == RowState::Same);
     CHECK(amb[8].state == RowState::New);
+
+    // Av Fas2 och Fas3 jämförs med Av i före: lika som tal är lika, en tom fas skiljer sig.
+    std::vector<PoleRow> phases = asAfter(appendixA());
+    phases[1].av2 = "300.0";
+    phases[2].av3.clear();
+    phases[3].av2 = "301";
+    const std::vector<RowCompare> ph = compareAfter(appendixA(), phases);
+    CHECK(ph[1].state == RowState::Same);
+    CHECK(ph[2].state == RowState::Changed && ph[2].changed[poletable::kAv3] && !ph[2].changed[poletable::kAv]);
+    CHECK(ph[3].state == RowState::Changed && ph[3].changed[poletable::kAv2] && !ph[3].changed[poletable::kAv3]);
 
     // Tom före och tom efter.
     CHECK(compareAfter({}, {}).empty());
@@ -441,6 +471,56 @@ void testTableMarks()
         CHECK(note.empty());
 }
 
+// Återställningen av en cell: bara en Changed-rad och en kolumn som skiljer sig, aldrig Stolpnr.
+void testRestoreFromBefore()
+{
+    using namespace kalkyl::poletable;
+    const std::vector<PoleRow> before = appendixA();
+    std::vector<PoleRow> after = asAfter(before);
+    after[2].spanM = "999";
+    after[2].height = "45.00";   // lika som tal
+    after[4].av = "301";
+    after[5].av3 = "12";         // Av Fas3 återställs ur Av
+    after[0].spanM = "0";        // före har tom
+    after[8].pole = "ST0200";    // ny
+    const std::vector<RowCompare> cmp = compareAfter(before, after);
+
+    const std::optional<Edit> span = restoreFromBefore(before, cmp, 2, kSpan);
+    CHECK(span && span->row == 2 && span->column == kSpan && span->text == "320");
+    CHECK(!restoreFromBefore(before, cmp, 2, kHeight));
+    const std::optional<Edit> av = restoreFromBefore(before, cmp, 4, kAv);
+    CHECK(av && av->row == 4 && av->column == kAv && av->text == "300");
+    CHECK(!restoreFromBefore(before, cmp, 4, kSpan));
+    const std::optional<Edit> empty = restoreFromBefore(before, cmp, 0, kSpan);
+    CHECK(empty && empty->row == 0 && empty->column == kSpan && empty->text.empty());
+    CHECK(!restoreFromBefore(before, cmp, 8, kSpan));
+    CHECK(!restoreFromBefore(before, cmp, 1, kAh));
+    const std::optional<Edit> av3 = restoreFromBefore(before, cmp, 5, kAv3);
+    CHECK(av3 && av3->row == 5 && av3->column == kAv3 && av3->text == "300");
+    CHECK(!restoreFromBefore(before, cmp, 5, kAv2));
+    CHECK(!restoreFromBefore(before, cmp, 2, -1));
+    CHECK(!restoreFromBefore(before, cmp, 2, kAv2));
+    CHECK(!restoreFromBefore(before, cmp, 2, kFieldCount));
+    CHECK(!restoreFromBefore(before, cmp, 99, kSpan));
+    CHECK(!restoreFromBefore(before, cmp, -1, kSpan));
+
+    // Stolpnr återställs aldrig, inte ens när en handbyggd jämförelse säger att den skiljer sig.
+    RowCompare handmade;
+    handmade.state = RowState::Changed;
+    handmade.beforeRow = 0;
+    handmade.changed[kPole] = true;
+    CHECK(!restoreFromBefore(before, {handmade}, 0, kPole));
+
+    // En osäker rad (Stolpnr flera gånger i före) kan inte återställas.
+    std::vector<PoleRow> dupBefore = appendixA();
+    dupBefore[8].pole = "ST0103";
+    std::vector<PoleRow> dupAfter = appendixA();
+    dupAfter[3].spanM = "999";
+    const std::vector<RowCompare> amb = compareAfter(dupBefore, dupAfter);
+    CHECK(amb[3].state == RowState::Ambiguous);
+    CHECK(!restoreFromBefore(dupBefore, amb, 3, kSpan));
+}
+
 } // namespace
 
 int main()
@@ -453,6 +533,7 @@ int main()
     testDuplicatePoles();
     testCompareAfter();
     testTableMarks();
+    testRestoreFromBefore();
     if (g_failures != 0) {
         std::cerr << g_failures << " kontroller misslyckades" << std::endl;
         return 1;

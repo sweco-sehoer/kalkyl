@@ -17,6 +17,7 @@
 #include "lineCalc/line_calc.h"
 #include "poleGrid/pole_grid.h"
 #include "poleTable/pole_table.h"
+#include "poleView/pole_view.h"
 #include "projectdb/project_data.h"
 #include "projectdb/project_db.h"
 #include "systemdb/system_db.h"
@@ -98,6 +99,10 @@ private:
     glaze::Label efterAndradText;
     glaze::Label efterNyRuta;
     glaze::Label efterNyText;
+    glaze::Label efterFilterLbl;
+    glaze::Dropdown efterFilterDrop;
+    glaze::Button efterVisaBtn;
+    glaze::Label efterFilterInfo;
     glaze::DataGrid efterGrid;
     glaze::Panel nsPanel;
     glaze::Panel lcPanel;
@@ -390,6 +395,13 @@ private:
     // Sträckorna som i före: hämtar start och slut ur före utan att röra raderna i efter.
     void efterSomForeBtnClicked(glaze::Widget* sender, glaze::ClickArgs& e);
 
+    // Filtret i Stolptabell efter: Förändrade ±2 eller Alla. Valet sparas i systemdatabasen, och
+    // Förändrade ±2 rullar till de förändrade stolparna.
+    void efterFilterDropChanged(glaze::Widget* sender, glaze::ChangeArgs& e);
+
+    // Visa förändrade: rullar Stolptabell efter till de förändrade stolparna (PoleGrid::showChanged).
+    void efterVisaBtnClicked(glaze::Widget* sender, glaze::ClickArgs& e);
+
     // Tabellernas händelser går vidare till PoleGrid: en sparad cell, radera-knappen, tangenterna,
     // musen och högerklicket. Stolptabell före först och Stolptabell efter sedan.
     void stolpGridCommitted(glaze::Widget* sender, glaze::CellChangeArgs& e);
@@ -416,6 +428,7 @@ private:
         void addMenuItems(glaze::Menu& menu, int row) override;
         std::string removeNote(int first, int last) const override;
         void showStatus(const std::string& text) override;
+        void filterChanged(kalkyl::poleview::Filter filter) override;
 
     private:
         MainWindow& window_;
@@ -458,6 +471,13 @@ private:
 
     // Räknar om markeringarna och jämförelsen mot före och ger dem till tabellerna.
     void updatePoleLooks();
+
+    // Sätter filtret i Stolptabell efter: rullistan, PoleGrid och, med save, systemdatabasen. center
+    // rullar till de förändrade stolparna. Ett fel vid sparningen visas i statusraden.
+    void applyAfterFilter(kalkyl::poleview::Filter filter, bool save, bool center);
+
+    // Infotexten bredvid Visa förändrade och om knappen är tänd (poleview::summarize).
+    void updateAfterFilterInfo();
 
     // Sparar inställningen för skedet. Vid fel visas en ruta och inställningen läses om.
     void saveAutoSettings(kalkyl::projectdb::Stage stage, const kalkyl::projectdb::AutoSettings& settings);
@@ -535,6 +555,7 @@ private:
     std::unique_ptr<kalkyl::polegrid::PoleGrid> afterGrid_;          // Stolptabell efter i efterGrid
     kalkyl::projectdb::AutoSettings autoBefore_;                     // automatiskt läge och sträckor i före
     kalkyl::projectdb::AutoSettings autoAfter_;                      // automatiskt läge och sträckor i efter
+    kalkyl::poleview::Filter afterFilter_ = kalkyl::poleview::Filter::Changed; // filtret i Stolptabell efter
     AutoPanel beforePanel_;                                          // panelen Automatiskt läge i före
     AutoPanel afterPanel_;                                           // panelen Automatiskt läge i efter
     int gridStatusPanel_ = -1;                                       // statusradens panel för tabellens meddelanden

@@ -137,14 +137,44 @@ void testFieldAndNames()
     CHECK(columnName(5) == "Ah");
     CHECK(columnName(6) == "Av");
     CHECK(columnName(7) == "LKL");
-    CHECK(columnName(8).empty());
+    CHECK(columnName(kAv2) == "Av Fas2");
+    CHECK(columnName(kAv3) == "Av Fas3");
+    CHECK(afterColumnName(kAv) == "Av Fas1" && afterColumnName(kAv2) == "Av Fas2" && afterColumnName(kLkl) == "LKL");
+    CHECK(columnName(kFieldCount).empty());
     CHECK(columnName(-1).empty());
 
     CHECK(!isNumberColumn(0));
     CHECK(isNumberColumn(1) && isNumberColumn(6));
     CHECK(!isNumberColumn(7));
-    CHECK(!isNumberColumn(8));
+    CHECK(isNumberColumn(kAv2) && isNumberColumn(kAv3));
+    CHECK(!isNumberColumn(kFieldCount));
     CHECK(kColumnCount == 8);
+    CHECK(kFieldCount == 10);
+}
+
+// Av per fas i Stolptabell efter: fälten, motsvarigheten i före och kolumnordningarna.
+void testPhaseFields()
+{
+    PoleRow row;
+    field(row, kAv2) = "300";
+    field(row, kAv3) = "301";
+    CHECK(row.av2 == "300" && row.av3 == "301" && row.av.empty());
+    CHECK(!isEmptyRow(row));
+    CHECK(acceptField(kAv2, "1,50") == std::optional<std::string>("1.50"));
+    CHECK(!acceptField(kAv3, "abc"));
+    row.av3 = "1,5";
+    CHECK(firstInvalidColumn(row) == std::optional<int>(kAv3));
+    CHECK(displayText(PoleRow{"", "", "", "", "", "", "", "", "1234.5", ""}, kAv2) != "");
+
+    CHECK(beforeField(kAv2) == kAv && beforeField(kAv3) == kAv && beforeField(kAv) == kAv);
+    CHECK(beforeField(kLkl) == kLkl && beforeField(kPole) == kPole);
+
+    CHECK(beforeColumns() == std::vector<int>({kPole, kNorth, kEast, kHeight, kSpan, kAh, kAv, kLkl}));
+    CHECK(afterColumns() == std::vector<int>({kPole, kNorth, kEast, kHeight, kSpan, kAh, kAv, kAv2, kAv3, kLkl}));
+
+    std::vector<PoleRow> rows(1);
+    applyEdits(rows, {{0, kAv2, "5"}, {0, kAv3, "6"}});
+    CHECK(rows[0].av2 == "5" && rows[0].av3 == "6");
 }
 
 // applyEdits skapar tomma rader fram till en rad bortom slutet och ignorerar ogiltiga ändringar.
@@ -158,7 +188,7 @@ void testApplyEdits()
     CHECK(rows.size() == 6 && rows[0].pole == "A" && rows[1].pole == "B");
 
     const std::vector<PoleRow> before = rows;
-    applyEdits(rows, {{-1, kPole, "x"}, {0, 8, "x"}, {0, -1, "x"}, {9, 8, "x"}});
+    applyEdits(rows, {{-1, kPole, "x"}, {0, kFieldCount, "x"}, {0, -1, "x"}, {9, kFieldCount, "x"}});
     CHECK(rows == before);
 
     applyEdits(rows, {{0, kPole, "C"}, {0, kLkl, "262"}});
@@ -223,6 +253,7 @@ int main()
     testAcceptField();
     testDisplayAndNumber();
     testFieldAndNames();
+    testPhaseFields();
     testApplyEdits();
     testTrimAndSave();
     testFirstInvalidColumn();

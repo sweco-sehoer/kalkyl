@@ -25,6 +25,7 @@ target_link_libraries(kalkyl PRIVATE
     kalkyl_conductor
     kalkyl_ancalc
     kalkyl_automode
+    kalkyl_poleview
     kalkyl_linecalc
     kalkyl_sheetgrid
     kalkyl_polegrid

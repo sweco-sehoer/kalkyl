@@ -591,6 +591,52 @@ void testLastImportFolder(const std::string& dir)
     CHECK(again.value().lastFolder() == join(dir, "Projekt åäö"));
 }
 
+// Filtret i Stolptabell efter: förvalet Changed, All består över omöppning, ett skräpvärde ger
+// Changed, och en databas i minnet fungerar under sessionen.
+void testAfterFilter(const std::string& dir)
+{
+    using systemdb::AfterFilter;
+    const std::string path = join(dir, "efterfilter.db");
+    {
+        auto sys = systemdb::SystemDb::open(path);
+        CHECK(sys.ok());
+        if (!sys.ok())
+            return;
+        CHECK(sys.value().afterFilter() == AfterFilter::Changed);
+        CHECK(sys.value().setAfterFilter(AfterFilter::All).ok());
+        CHECK(sys.value().afterFilter() == AfterFilter::All);
+    }
+    {
+        auto sys = systemdb::SystemDb::open(path);
+        CHECK(sys.ok());
+        if (!sys.ok())
+            return;
+        CHECK(sys.value().afterFilter() == AfterFilter::All);
+        CHECK(sys.value().setAfterFilter(AfterFilter::Changed).ok());
+        CHECK(sys.value().afterFilter() == AfterFilter::Changed);
+        CHECK(sys.value().setAfterFilter(AfterFilter::All).ok());
+    }
+    {
+        auto raw = db::Database::open(path, db::OpenOptions{});
+        CHECK(raw.ok());
+        if (raw.ok())
+            CHECK(raw.value().exec(R"sql(UPDATE setting SET value = 'x' WHERE key = 'pole_after_filter')sql").ok());
+    }
+    {
+        auto sys = systemdb::SystemDb::open(path);
+        CHECK(sys.ok());
+        if (sys.ok())
+            CHECK(sys.value().afterFilter() == AfterFilter::Changed);
+    }
+    auto mem = systemdb::SystemDb::openInMemory("test");
+    CHECK(mem.ok());
+    if (!mem.ok())
+        return;
+    CHECK(mem.value().afterFilter() == AfterFilter::Changed);
+    CHECK(mem.value().setAfterFilter(AfterFilter::All).ok());
+    CHECK(mem.value().afterFilter() == AfterFilter::All);
+}
+
 // De inlärda rubrikerna: ordningen med senast först, en dubblett som flyttas först, högst tio
 // per fält, andra fält orörda, ogiltiga värden, omöppning och reserven i minnet.
 void testLearnedHeaders(const std::string& dir)
@@ -734,6 +780,7 @@ int main()
     testConductorRemoveRestore(dir);
     testAutosaveSetting(dir);
     testLastImportFolder(dir);
+    testAfterFilter(dir);
     testLearnedHeaders(dir);
     testOldSchemaMovedAside(dir);
 

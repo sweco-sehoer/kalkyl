@@ -533,7 +533,7 @@ void testSchemaTables()
         return;
     CHECK(countIn(created.value(), kSeventeenTablesSql) == 17);
     CHECK(countIn(created.value(), "PRAGMA user_version") == projectdb::kSchemaVersion);
-    CHECK(projectdb::kSchemaVersion == 6);
+    CHECK(projectdb::kSchemaVersion == 7);
 }
 
 // Skapar en projektfil med bara tabellen project, som i v0.1.0, och angiven user_version.
@@ -1637,7 +1637,12 @@ void testCopyBeforeToAfter()
 
     CHECK(projectdb::copyBeforeToAfter(p).ok());
     auto after = projectdb::poles(p, Stage::After);
-    CHECK(after.ok() && after.value() == annexRows());
+    std::vector<poletable::PoleRow> copied = annexRows();   // Av i alla tre faserna
+    for (poletable::PoleRow& row : copied) {
+        row.av2 = row.av;
+        row.av3 = row.av;
+    }
+    CHECK(after.ok() && after.value() == copied);
     auto before = projectdb::polesBefore(p);
     CHECK(before.ok() && before.value() == annexRows());
     auto afterSettings = projectdb::autoSettings(p, Stage::After);
@@ -2360,6 +2365,74 @@ INSERT INTO auto_mode(stage, enabled, phase_from, phase_to) VALUES ('before', 0,
     auto settings = projectdb::autoSettings(p, Stage::Before);
     CHECK(settings.ok() && !settings.value().enabled && settings.value().ranges[0].fromPole == "ST0378" &&
           settings.value().ranges[0].toPole == "ST0381");
+}
+
+// Ett projekt från v0.5.0 (steg 1–6, user_version 6) migreras till steg 7: pole_after får Av Fas2
+// och Fas3 med Av:s värde på varje rad (NULL förblir tomt), allt annat finns kvar, och Av per fas
+// går att spara och läsa tillbaka. copyBeforeToAfter ger Av i alla tre faserna.
+void testMigrateFromStep6()
+{
+    const std::string path = join(g_share, "Från steg 6.kalkyl");
+    if (!writeV040Project(path))
+        return;
+    {
+        auto d = db::Database::open(path, db::OpenOptions{});
+        CHECK(d.ok());
+        if (!d.ok())
+            return;
+        bool ok = d.value().exec(std::string(projectdb::dev::kStep5)).ok();
+        ok = ok && d.value().exec(std::string(projectdb::dev::kStep6)).ok();
+        ok = ok && d.value().exec(R"sql(
+PRAGMA user_version = 6;
+INSERT INTO pole_after(position, pole, av, ah, span_m, coord_n, coord_e, coord_h, lkl)
+VALUES (0, 'ST0378', '363', NULL, '348', NULL, NULL, '44.19', '255/262'),
+       (1, 'ST0379', NULL, '12', '320', NULL, NULL, '41.5', '');
+)sql").ok();
+        CHECK(ok);
+        if (!ok)
+            return;
+    }
+    CHECK(scalar(path, "PRAGMA user_version") == 6);
+
+    auto opened = projectdb::ProjectDb::open(path, options());
+    CHECK(opened.ok());
+    if (!opened.ok()) {
+        std::cerr << opened.error().message << " / " << opened.error().detail << std::endl;
+        return;
+    }
+    projectdb::ProjectDb& p = opened.value();
+    CHECK(countIn(p, "PRAGMA user_version") == projectdb::kSchemaVersion);
+    CHECK(countIn(p, kSeventeenTablesSql) == 17);
+    checkV040Data(p, false);
+    auto after = projectdb::poles(p, Stage::After);
+    CHECK(after.ok() && after.value().size() == 2);
+    if (after.ok() && after.value().size() == 2) {
+        const auto& a = after.value();
+        CHECK(a[0].pole == "ST0378" && a[0].av == "363" && a[0].av2 == "363" && a[0].av3 == "363");
+        CHECK(a[0].spanM == "348" && a[0].lkl == "255/262");
+        CHECK(a[1].pole == "ST0379" && a[1].av.empty() && a[1].av2.empty() && a[1].av3.empty() && a[1].ah == "12");
+    }
+
+    // Av per fas sparas och läses tillbaka, och före får inga faser.
+    std::vector<poletable::PoleRow> rows = after.ok() ? after.value() : std::vector<poletable::PoleRow>{};
+    if (!rows.empty()) {
+        rows[0].av2 = "370.5";
+        rows[0].av3 = "";
+        CHECK(projectdb::setPoles(p, Stage::After, rows).ok());
+        auto back = projectdb::poles(p, Stage::After);
+        CHECK(back.ok() && back.value() == rows);
+    }
+    auto bad = projectdb::setPoles(p, Stage::After, {poletable::PoleRow{"X1", "1", "", "", "", "", "", "", "abc", ""}});
+    CHECK(!bad.ok() && bad.error().code == ErrorCode::Invalid);
+
+    // Kopieringen från före ger Av i alla tre faserna.
+    CHECK(projectdb::setPolesBefore(p, {poletable::PoleRow{"ST0100", "300.25", "", "", "", "", "", ""}}).ok());
+    CHECK(projectdb::copyBeforeToAfter(p).ok());
+    auto copied = projectdb::poles(p, Stage::After);
+    CHECK(copied.ok() && copied.value().size() == 1 && copied.value()[0].av == "300.25" &&
+          copied.value()[0].av2 == "300.25" && copied.value()[0].av3 == "300.25");
+    auto before = projectdb::polesBefore(p);
+    CHECK(before.ok() && before.value().size() == 1 && before.value()[0].av2.empty());
 }
 
 // Skapar projektfilen som v0.3.2 hade den: steg 1 till 3, user_version 3 och uppgifter i alla
@@ -3655,6 +3728,7 @@ int main()
     testAutoIssue();
     testMigrateFromV040();
     testMigrateFromStep5();
+    testMigrateFromStep6();
     testPoleImportRoundTrip();
     testPoleImportReplaced();
     testPoleImportUntouched();

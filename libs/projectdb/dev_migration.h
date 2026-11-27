@@ -257,4 +257,13 @@ CREATE TABLE IF NOT EXISTS pole_import_cell (
 ) WITHOUT ROWID;
 )sql";
 
+// Steg 7 (user_version 6 -> 7): Av per fas i Stolptabell efter. av är Av Fas1, och av2 och av3
+// är Fas2 och Fas3. De befintliga raderna får Av i alla tre faserna, som vid en kopiering från
+// Stolptabell före.
+inline constexpr std::string_view kStep7 = R"sql(
+ALTER TABLE pole_after ADD COLUMN av2 TEXT;
+ALTER TABLE pole_after ADD COLUMN av3 TEXT;
+UPDATE pole_after SET av2 = av, av3 = av;
+)sql";
+
 } // namespace kalkyl::projectdb::dev

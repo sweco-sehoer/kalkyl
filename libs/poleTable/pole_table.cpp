@@ -21,18 +21,37 @@ std::string shownText(const PoleRow& row, int column, bool group)
     return tabletext::formatDecimalText(value, ',', group);
 }
 
-// Fält som aldrig nås (kolumn utanför 0-7) pekar hit.
+// Fält som aldrig nås (fält utanför 0-9) pekar hit.
 const std::string kNoField;
 
 } // namespace
 
-// Sant för talkolumnerna 1-6, alla kolumner utom Stolpnr och LKL.
-bool isNumberColumn(int column)
+// Av Fas2 och Fas3 har Av som motsvarighet i före, de andra fälten sig själva.
+int beforeField(int field)
 {
-    return column > kPole && column < kLkl;
+    return (field == kAv2 || field == kAv3) ? kAv : field;
 }
 
-// Kolumnens namn i meddelanden. Tom text utanför 0-7.
+// Före: fälten i ordning. Efter: Av per fas före LKL.
+const std::vector<int>& beforeColumns()
+{
+    static const std::vector<int> columns = {kPole, kNorth, kEast, kHeight, kSpan, kAh, kAv, kLkl};
+    return columns;
+}
+
+const std::vector<int>& afterColumns()
+{
+    static const std::vector<int> columns = {kPole, kNorth, kEast, kHeight, kSpan, kAh, kAv, kAv2, kAv3, kLkl};
+    return columns;
+}
+
+// Sant för talfälten: alla utom Stolpnr och LKL.
+bool isNumberColumn(int column)
+{
+    return (column > kPole && column < kLkl) || column == kAv2 || column == kAv3;
+}
+
+// Fältets namn i meddelanden. Tom text utanför 0-9.
 std::string columnName(int column)
 {
     switch (column) {
@@ -44,8 +63,16 @@ std::string columnName(int column)
     case kAh: return "Ah";
     case kAv: return "Av";
     case kLkl: return "LKL";
+    case kAv2: return "Av Fas2";
+    case kAv3: return "Av Fas3";
     default: return std::string();
     }
+}
+
+// I efter har Av en fas, och de andra fälten heter som i columnName.
+std::string afterColumnName(int column)
+{
+    return column == kAv ? std::string("Av Fas1") : columnName(column);
 }
 
 // LKL: delarna mellan radbrytningar och snedstreck, trimmade och utan tomma, med "/" emellan.
@@ -72,7 +99,7 @@ std::string normalizeLkl(std::string_view text)
     return out;
 }
 
-// Fältet för kolumnen 0-7, för läsning. Utanför 0-7 ges ett tomt fält.
+// Fältet 0-9, för läsning. Utanför 0-9 ges ett tomt fält.
 const std::string& field(const PoleRow& row, int column)
 {
     switch (column) {
@@ -84,12 +111,13 @@ const std::string& field(const PoleRow& row, int column)
     case kEast: return row.east;
     case kHeight: return row.height;
     case kLkl: return row.lkl;
+    case kAv2: return row.av2;
+    case kAv3: return row.av3;
     default: return kNoField;
     }
 }
 
-// Fältet för kolumnen 0-7, för skrivning. Anroparen ska ha kontrollerat kolumnen;
-// utanför 0-7 ges Stolpnr.
+// Fältet 0-9, för skrivning. Anroparen ska ha kontrollerat fältet; utanför 0-9 ges Stolpnr.
 std::string& field(PoleRow& row, int column)
 {
     switch (column) {
@@ -100,6 +128,8 @@ std::string& field(PoleRow& row, int column)
     case kEast: return row.east;
     case kHeight: return row.height;
     case kLkl: return row.lkl;
+    case kAv2: return row.av2;
+    case kAv3: return row.av3;
     default: return row.pole;
     }
 }
@@ -107,7 +137,7 @@ std::string& field(PoleRow& row, int column)
 // Texten som den lagras: text trimmas och tal blir kanonisk decimaltext.
 std::optional<std::string> acceptField(int column, std::string_view text)
 {
-    if (column < kPole || column > kLkl)
+    if (column < kPole || column >= kFieldCount)
         return std::nullopt;
     if (isNumberColumn(column))
         return tabletext::normalizeDecimal(text);
@@ -136,19 +166,21 @@ std::optional<double> numberValue(const PoleRow& row, int column)
     return tabletext::parseDecimal(field(row, column));
 }
 
-// Sant när alla åtta fält är tomma.
+// Sant när alla tio fält är tomma.
 bool isEmptyRow(const PoleRow& row)
 {
-    for (int c = 0; c < kColumnCount; ++c)
+    for (int c = 0; c < kFieldCount; ++c)
         if (!field(row, c).empty())
             return false;
     return true;
 }
 
-// Första talkolumnen vars text inte är tom eller kanonisk decimaltext.
+// Första talfältet vars text inte är tom eller kanonisk decimaltext.
 std::optional<int> firstInvalidColumn(const PoleRow& row)
 {
-    for (int c = kPole + 1; c < kLkl; ++c) {
+    for (int c = kPole + 1; c < kFieldCount; ++c) {
+        if (!isNumberColumn(c))
+            continue;
         const std::string& value = field(row, c);
         if (value.empty())
             continue;
@@ -163,7 +195,7 @@ std::optional<int> firstInvalidColumn(const PoleRow& row)
 void applyEdits(std::vector<PoleRow>& rows, const std::vector<Edit>& edits)
 {
     for (const Edit& edit : edits) {
-        if (edit.row < 0 || edit.column < kPole || edit.column > kLkl)
+        if (edit.row < 0 || edit.column < kPole || edit.column >= kFieldCount)
             continue;
         if (static_cast<std::size_t>(edit.row) >= rows.size())
             rows.resize(static_cast<std::size_t>(edit.row) + 1);

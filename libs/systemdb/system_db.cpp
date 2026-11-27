@@ -355,6 +355,19 @@ Result<void> SystemDb::setLastImportFolder(const std::string& folder)
     return setSetting("last_import_folder", folder);
 }
 
+// Filtret i Stolptabell efter. Bara texten all ger All, så att ett saknat eller okänt värde
+// och ett fel vid läsningen alltid ger förvalet Förändrade ±2.
+AfterFilter SystemDb::afterFilter()
+{
+    return setting("pole_after_filter") == "all" ? AfterFilter::All : AfterFilter::Changed;
+}
+
+// Sparar filtret som text: changed eller all. Texten gör värdet läsbart i ett vanligt SQLite-verktyg.
+Result<void> SystemDb::setAfterFilter(AfterFilter filter)
+{
+    return setSetting("pole_after_filter", filter == AfterFilter::All ? "all" : "changed");
+}
+
 namespace {
 
 // Högsta antal inlärda rubriker per fält.

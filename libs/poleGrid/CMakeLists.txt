@@ -3,4 +3,5 @@
 add_library(kalkyl_polegrid STATIC pole_grid.cpp)
 target_include_directories(kalkyl_polegrid PUBLIC ${PROJECT_SOURCE_DIR}/libs)
 target_link_libraries(kalkyl_polegrid PUBLIC glaze kalkyl_sheetgrid kalkyl_poletable kalkyl_automode
+                      kalkyl_poleview
                       PRIVATE kalkyl_tabletext kalkyl_warnings)

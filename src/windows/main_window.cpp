@@ -392,6 +392,32 @@ std::string tensionText(const kalkyl::linecalc::LineInput& input)
     return input.tensionMpa ? shortNumber(*input.tensionMpa) : std::string("–");
 }
 
+// Filtret i vyn ur systemdatabasens val. Rullistans post 0 är Förändrade ±2 och post 1 är Alla.
+kalkyl::poleview::Filter viewFilterOf(kalkyl::systemdb::AfterFilter filter)
+{
+    return filter == kalkyl::systemdb::AfterFilter::All ? kalkyl::poleview::Filter::All
+                                                        : kalkyl::poleview::Filter::Changed;
+}
+
+// Systemdatabasens val ur filtret i vyn.
+kalkyl::systemdb::AfterFilter sysFilterOf(kalkyl::poleview::Filter filter)
+{
+    return filter == kalkyl::poleview::Filter::All ? kalkyl::systemdb::AfterFilter::All
+                                                   : kalkyl::systemdb::AfterFilter::Changed;
+}
+
+// Filtrets post i rullistan efterFilterDrop: 0 är Förändrade ±2 och 1 är Alla.
+int dropIndexOf(kalkyl::poleview::Filter filter)
+{
+    return filter == kalkyl::poleview::Filter::All ? 1 : 0;
+}
+
+// Filtret för en post i rullistan efterFilterDrop.
+kalkyl::poleview::Filter filterOfDropIndex(int index)
+{
+    return index == 1 ? kalkyl::poleview::Filter::All : kalkyl::poleview::Filter::Changed;
+}
+
 } // namespace
 
 // Anger systemdatabasen och projektet som fönstret visar.
@@ -471,7 +497,8 @@ void MainWindow::onLoad(glaze::Widget*, glaze::EventArgs&)
     beforeGrid_ = std::make_unique<kalkyl::polegrid::PoleGrid>(
         *this, stolpGrid, *beforeHost_, std::string(kalkyl::projectdb::poleTableName(Stage::Before)));
     afterGrid_ = std::make_unique<kalkyl::polegrid::PoleGrid>(
-        *this, efterGrid, *afterHost_, std::string(kalkyl::projectdb::poleTableName(Stage::After)));
+        *this, efterGrid, *afterHost_, std::string(kalkyl::projectdb::poleTableName(Stage::After)),
+        kalkyl::poletable::afterColumns());
     beforePanel_.check = &stolpAutoChk;
     beforePanel_.names = {&stolpFasLbl, &stolpToppVLbl, &stolpToppHLbl};
     beforePanel_.drops = {&stolpFasFran, &stolpFasTill, &stolpToppVFran, &stolpToppVTill, &stolpToppHFran, &stolpToppHTill};
@@ -480,6 +507,11 @@ void MainWindow::onLoad(glaze::Widget*, glaze::EventArgs&)
     afterPanel_.names = {&efterFasLbl, &efterToppVLbl, &efterToppHLbl};
     afterPanel_.drops = {&efterFasFran, &efterFasTill, &efterToppVFran, &efterToppVTill, &efterToppHFran, &efterToppHTill};
     afterPanel_.status = {&efterFasStatus, &efterToppVStatus, &efterToppHStatus};
+
+    // Stolptabell efter jämförs med före, och filtret är det sparade valet. Rullistan och
+    // knappen släcks inte skrivskyddat, eftersom de bara ändrar visningen.
+    afterGrid_->setComparesWithBefore(true);
+    applyAfterFilter(viewFilterOf(sys_->afterFilter()), false, false);
 
     // Skrivskyddat: rutorna, rullistorna och knapparna släcks, och tabellerna låses.
     if (readOnly()) {
@@ -700,6 +732,13 @@ void MainWindow::PoleHost::showStatus(const std::string& text)
     window_.setPoleStatus(text);
 }
 
+// Värden till PoleGrid: filtret byttes i tabellen (Visa alla rader, eller en dold stolpe som
+// visas). Valet sparas och rullistan följer.
+void MainWindow::PoleHost::filterChanged(kalkyl::poleview::Filter filter)
+{
+    window_.applyAfterFilter(filter, true, false);
+}
+
 // Tabellen för skedet.
 kalkyl::polegrid::PoleGrid& MainWindow::poleGridOf(Stage stage) const
 {
@@ -858,6 +897,40 @@ void MainWindow::updatePoleLooks()
         after, autoAfter_.enabled ? namedRanges(Stage::After) : std::vector<kalkyl::automode::NamedRange>{},
         kalkyl::projectdb::poleTableName(Stage::After));
     afterGrid_->setLooks(std::move(afterLooks));
+    updateAfterFilterInfo();
+}
+
+// Infotexten bredvid Visa förändrade ur poleview::summarize, och knappen är tänd när minst en
+// rad är förändrad eller har en borttagen stolpe bredvid sig.
+void MainWindow::updateAfterFilterInfo()
+{
+    const auto summary = kalkyl::poleview::summarize(beforeGrid_->rows(), afterGrid_->rows(), afterFilter_);
+    efterFilterInfo.setText(kalkyl::poleview::summaryText(summary, afterFilter_));
+    if (summary.marked > 0)
+        efterVisaBtn.enable();
+    else
+        efterVisaBtn.disable();
+}
+
+// Sätter filtret i Stolptabell efter: rullistan, PoleGrid och, med save, systemdatabasen. Ett fel
+// vid sparningen loggas och visas i statusraden, och valet gäller ändå under sessionen. center
+// rullar tabellen till de förändrade stolparna.
+void MainWindow::applyAfterFilter(kalkyl::poleview::Filter filter, bool save, bool center)
+{
+    commitEdits();
+    afterFilter_ = filter;
+    efterFilterDrop.setSelectedIndex(dropIndexOf(filter));
+    afterGrid_->setFilter(filter);
+    if (save) {
+        const auto saved = sys_->setAfterFilter(sysFilterOf(filter));
+        if (!saved) {
+            gfx::log("Filtret kunde inte sparas: %s", saved.error().detail.c_str());
+            setPoleStatus("Filtret kunde inte sparas: " + saved.error().message);
+        }
+    }
+    if (center)
+        afterGrid_->showChanged();
+    updateAfterFilterInfo();
 }
 
 // Sparar inställningen för skedet. Vid fel loggas det och en ruta visas, och inställningen läses
@@ -1121,6 +1194,24 @@ void MainWindow::efterSomForeBtnClicked(glaze::Widget*, glaze::ClickArgs&)
     saveAutoSettings(Stage::After, settings);
     if (autoAfter_ == settings)
         setPoleStatus("Start och slut är nu som i Stolptabell före.");
+}
+
+// Filtret i Stolptabell efter byttes i rullistan. Är valet nytt sparas det, och Förändrade ±2
+// rullar till de förändrade stolparna.
+void MainWindow::efterFilterDropChanged(glaze::Widget*, glaze::ChangeArgs&)
+{
+    const auto filter = filterOfDropIndex(efterFilterDrop.selectedIndex());
+    if (filter == afterFilter_)
+        return;
+    applyAfterFilter(filter, true, filter == kalkyl::poleview::Filter::Changed);
+}
+
+// Visa förändrade: rullar Stolptabell efter till de förändrade stolparna. Finns inga visas en text.
+void MainWindow::efterVisaBtnClicked(glaze::Widget*, glaze::ClickArgs&)
+{
+    commitEdits();
+    if (!afterGrid_->showChanged())
+        setPoleStatus("Stolptabell efter har inga förändringar mot Stolptabell före.");
 }
 
 // Skriver en kort text i statusradens panel för tabellens meddelanden.

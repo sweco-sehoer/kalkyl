@@ -2,7 +2,7 @@
 
 Systemdatabasen `system.db`: lokal per användare, alltid synkron på UI-tråden. Biblioteket heter
 `kalkyl_systemdb`, namnrymden `kalkyl::systemdb` och includes skrivs `"systemdb/system_db.h"`.
-Den sparar utseendeläget (`theme_mode`), senaste mapp (`last_folder`), importmappen (`last_import_folder`), de inlärda rubrikerna (`pole_import_learned`), de 10 senaste projekten och linregistret.
+Den sparar utseendeläget (`theme_mode`), senaste mapp (`last_folder`), importmappen (`last_import_folder`), de inlärda rubrikerna (`pole_import_learned`), filtret i Stolptabell efter (`pole_after_filter`), de 10 senaste projekten och linregistret.
 Plats, schema och felhantering står i den arkiverade planen `doc/plans/archive/2026-11-20_Grunder.md` (2.2, 2.10 och 5.4).
 Linregistret står i den arkiverade planen `doc/plans/archive/2026-11-23_Lindata.md`.
 Typen `Conductor` och valideringen ligger i `libs/conductor` (`kalkyl::conductor`), inte här.
@@ -10,7 +10,7 @@ Typen `Conductor` och valideringen ligger i `libs/conductor` (`kalkyl::conductor
 | Fil | Innehåll |
 |---|---|
 | `CMakeLists.txt` | Biblioteket (länkar `kalkyl_db`, `kalkyl_platform` och `kalkyl_conductor`). Testet `systemdb` ligger i `tests/` |
-| `system_db.h` | `SystemDb`, `ThemeMode`, `RecentProject`, `LearnedHeader`, `kMaxRecent`, `kApplicationId`, `kAutosaveChoices`, `kDefaultAutosaveMinutes` och `defaultPath()` |
+| `system_db.h` | `SystemDb`, `ThemeMode`, `AfterFilter`, `RecentProject`, `LearnedHeader`, `kMaxRecent`, `kApplicationId`, `kAutosaveChoices`, `kDefaultAutosaveMinutes` och `defaultPath()` |
 | `system_db.cpp` | Öppning, migrering, schemakontroll, undanflyttning av skadad fil, inställningar, senaste-listan och linregistret |
 | `conductor_seed_v1.h` | Startdatan: SWECO:s 129 linor som SQL (`kConductorSeedV1`), en del av schemats steg 1 |
 ## Regler
@@ -32,6 +32,8 @@ Typen `Conductor` och valideringen ligger i `libs/conductor` (`kalkyl::conductor
   Raderna står senast först. `learnedHeaders()` ger en tom lista vid fel eller när inget är sparat, och rader som inte går att tolka hoppas över.
   `learnHeader(field, key)` lägger rubriken först för fältet, flyttar en likadan som redan finns och behåller högst tio per fält (de senaste). Andra fält rörs inte.
   Fältet utanför 0-7 och en tom rubrik eller en rubrik med tabb eller radbrytning ger `Invalid`. Tabben och radbrytningen skrivs `char{9}` och `char{10}` i koden.
+- **Filtret i Stolptabell efter:** nyckeln `pole_after_filter` i tabellen `setting`, utan schemaändring och utan migreringssteg. Texten är `changed` (Förändrade ±2) eller `all` (Alla).
+  `afterFilter()` ger `AfterFilter::Changed` vid fel och för ett saknat eller okänt värde, och `setAfterFilter` sparar valet. `AfterFilter` speglar `poleview::Filter` utan att systemdb beror på poleView.
 - **Senaste projekt:** raden identifieras av `platform::pathKey`, så samma fil med andra versaler ger en rad.
   `touchRecentProject` lägger in och trimmar till `kMaxRecent` i en transaktion.
 - **Ordning:** `last_opened` med millisekunder, och `rowid` avgör vid lika tid.

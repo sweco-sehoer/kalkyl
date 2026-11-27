@@ -13,6 +13,10 @@ namespace kalkyl::systemdb {
 // Utseendeläget. Speglar glaze::ThemeMode utan att bero på glaze.
 enum class ThemeMode { System, Light, Dark };
 
+// Filtret i Stolptabell efter: Förändrade ±2 (Changed) eller Alla (All). Speglar poleview::Filter
+// utan att bero på poleView.
+enum class AfterFilter { Changed, All };
+
 // En rad i listan över senaste projekt.
 struct RecentProject { std::string path; std::string name; std::string lastOpenedUtc; };
 
@@ -62,6 +66,10 @@ public:
     // Mappen där Importera stolptabell… öppnar filväljaren, "" om inget är sparat. Nyckeln last_import_folder.
     std::string lastImportFolder();
     core::Result<void> setLastImportFolder(const std::string& folder);
+    // Filtret i Stolptabell efter. Changed vid fel, saknat eller okänt värde. Nyckeln pole_after_filter.
+    AfterFilter afterFilter();
+    // Sparar filtret som text: changed eller all.
+    core::Result<void> setAfterFilter(AfterFilter filter);
     // De inlärda rubrikerna, senast först. Tom lista vid fel eller när inget är sparat.
     // Nyckeln pole_import_learned: en rad per rubrik, fältet och rubriken skilda med en tabb.
     std::vector<LearnedHeader> learnedHeaders();
